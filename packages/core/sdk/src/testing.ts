@@ -8,7 +8,19 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 
-export { makeTestConfig, memorySecretsPlugin } from "./test-config";
+export {
+  makeTestConfig,
+  makeTestExecutor,
+  makeTestExecutorHarness,
+  makeTestExecutorLayer,
+  memorySecretsPlugin,
+  TestExecutor,
+  type TestConfigOptions,
+  type TestDatabaseBackend,
+  type TestExecutorHarness,
+  type TestFumaDb,
+} from "./test-config";
+export { createSqliteTestFumaDb, type SqliteTestFumaDb } from "./sqlite-test-db";
 
 export class TestHttpServerAddressError extends Data.TaggedError("TestHttpServerAddressError")<{
   readonly address: unknown;

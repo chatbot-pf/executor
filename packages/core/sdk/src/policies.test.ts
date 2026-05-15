@@ -2,10 +2,9 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Predicate, Result } from "effect";
 import { generateKeyBetween } from "fractional-indexing";
 
-import type { ToolPolicyRow } from "./core-schema";
+import { scopedExecutorTable, type ToolPolicyRow } from "./core-schema";
 import { PolicyId, ScopeId } from "./ids";
 import { Scope } from "./scope";
-import { createExecutor } from "./executor";
 import { ElicitationResponse, type ElicitationHandler } from "./elicitation";
 import {
   effectivePolicyFromSorted,
@@ -13,8 +12,8 @@ import {
   matchPattern,
   resolveToolPolicy,
 } from "./policies";
-import { definePlugin, defineSchema } from "./plugin";
-import { makeTestConfig } from "./testing";
+import { definePlugin } from "./plugin";
+import { makeTestExecutor } from "./testing";
 
 // ---------------------------------------------------------------------------
 // Pure unit tests — pattern matcher + resolution. No executor required.
@@ -252,8 +251,8 @@ describe("effectivePolicyFromSorted", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Executor integration — exercises invoke + list + CRUD with a real
-// in-memory adapter and a tiny test plugin. Mirrors the design choices:
+// Executor integration — exercises invoke + list + CRUD with FumaDB/SQLite
+// and a tiny test plugin. Mirrors the design choices:
 //   - block  → invisible to list; ToolBlockedError at invoke
 //   - approve → invoke skips approval prompt
 //   - require_approval → invoke fires elicitation, declined => fails
@@ -269,13 +268,9 @@ const recordingHandler = (calls: { count: number }): ElicitationHandler =>
 const decliningHandler: ElicitationHandler = () =>
   Effect.succeed(ElicitationResponse.make({ action: "decline" }));
 
-const policyTestSchema = defineSchema({
-  ptest_marker: {
-    fields: {
-      id: { type: "string", required: true },
-    },
-  },
-});
+const policyTestSchema = {
+  ptest_marker: scopedExecutorTable("ptest_marker", {}),
+};
 
 const policyTestPlugin = definePlugin(() => ({
   id: "ptest" as const,
@@ -320,12 +315,9 @@ const policyTestPlugin = definePlugin(() => ({
 }));
 
 const setupExecutor = () =>
-  Effect.gen(function* () {
-    const config = makeTestConfig({ plugins: [policyTestPlugin()] as const });
-    const executor = yield* createExecutor(config);
-    yield* executor.ptest.seed();
-    return executor;
-  });
+  makeTestExecutor({ plugins: [policyTestPlugin()] as const }).pipe(
+    Effect.tap((executor) => executor.ptest.seed()),
+  );
 
 describe("executor.policies", () => {
   it.effect("list is empty when no rules exist", () =>
@@ -362,15 +354,13 @@ describe("executor.policies", () => {
     Effect.gen(function* () {
       const userScope = ScopeId.make("policy-user");
       const orgScope = ScopeId.make("policy-org");
-      const executor = yield* createExecutor(
-        makeTestConfig({
-          scopes: [
-            Scope.make({ id: userScope, name: "user", createdAt: new Date() }),
-            Scope.make({ id: orgScope, name: "org", createdAt: new Date() }),
-          ],
-          plugins: [policyTestPlugin()] as const,
-        }),
-      );
+      const executor = yield* makeTestExecutor({
+        scopes: [
+          Scope.make({ id: userScope, name: "user", createdAt: new Date() }),
+          Scope.make({ id: orgScope, name: "org", createdAt: new Date() }),
+        ],
+        plugins: [policyTestPlugin()] as const,
+      });
 
       yield* executor.policies.create({
         targetScope: String(orgScope),
@@ -586,15 +576,13 @@ describe("blocked tools", () => {
     Effect.gen(function* () {
       const userScope = ScopeId.make("policy-user");
       const orgScope = ScopeId.make("policy-org");
-      const executor = yield* createExecutor(
-        makeTestConfig({
-          scopes: [
-            Scope.make({ id: userScope, name: "user", createdAt: new Date() }),
-            Scope.make({ id: orgScope, name: "org", createdAt: new Date() }),
-          ],
-          plugins: [policyTestPlugin()] as const,
-        }),
-      );
+      const executor = yield* makeTestExecutor({
+        scopes: [
+          Scope.make({ id: userScope, name: "user", createdAt: new Date() }),
+          Scope.make({ id: orgScope, name: "org", createdAt: new Date() }),
+        ],
+        plugins: [policyTestPlugin()] as const,
+      });
       yield* executor.ptest.seed(String(orgScope));
 
       yield* executor.policies.create({

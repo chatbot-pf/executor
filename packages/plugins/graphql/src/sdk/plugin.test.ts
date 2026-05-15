@@ -8,13 +8,13 @@ import {
   createExecutor,
   definePlugin,
   ElicitationResponse,
-  makeTestConfig,
   RemoveSecretInput,
   Scope,
   ScopeId,
   SecretId,
   TokenMaterial,
 } from "@executor-js/sdk";
+import { makeTestConfig } from "@executor-js/sdk/testing";
 import { memorySecretsPlugin, serveTestHttpApp } from "@executor-js/sdk/testing";
 
 import { graphqlPlugin } from "./plugin";
@@ -516,8 +516,8 @@ describe("graphqlPlugin", () => {
 
   // -------------------------------------------------------------------------
   // Multi-scope shadowing — regression suite covering the bug class where
-  // store reads/writes that don't pin scope_id collapse onto whichever row
-  // the scoped adapter's `scope_id IN (stack)` filter sees first. Each
+  // store reads/writes that don't pin scope_id collapse onto whichever visible
+  // row wins first. Each
   // scenario is reproducible against the pre-fix store.
   // -------------------------------------------------------------------------
 

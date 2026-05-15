@@ -1,13 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect } from "effect";
 
-import { makeMemoryAdapter } from "@executor-js/storage-core/testing/memory";
-
-import { makeInMemoryBlobStore } from "./blob";
-import { collectSchemas, createExecutor } from "./executor";
+import { createExecutor } from "./executor";
 import { definePlugin } from "./plugin";
 import { ConnectionId, ScopeId, SecretId } from "./ids";
 import { Scope } from "./scope";
+import { makeTestConfig } from "./testing";
 import { Usage } from "./usages";
 
 const leakingUsagePlugin = definePlugin(() => ({
@@ -40,8 +38,8 @@ const leakingUsagePlugin = definePlugin(() => ({
 const makeExecutor = () =>
   Effect.gen(function* () {
     const plugins = [leakingUsagePlugin()] as const;
-    const schema = collectSchemas(plugins);
     return yield* createExecutor({
+      ...makeTestConfig({ plugins }),
       scopes: [
         Scope.make({
           id: ScopeId.make("org-a"),
@@ -49,8 +47,6 @@ const makeExecutor = () =>
           createdAt: new Date(),
         }),
       ],
-      adapter: makeMemoryAdapter({ schema }),
-      blobs: makeInMemoryBlobStore(),
       plugins,
       onElicitation: "accept-all",
     });

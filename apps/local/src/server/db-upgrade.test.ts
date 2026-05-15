@@ -1,18 +1,16 @@
 // Upgrade path for local DBs written by pre-scope executor versions.
 //
-// These tests exercise both halves:
-//   1. The detector correctly identifies DBs missing the `scope_id`
-//      column on `source`.
-//   2. The move-aside helper renames the file (plus WAL/SHM siblings)
-//      so a subsequent fresh `migrate()` can create the new shape.
+// These helpers still run before the one-shot FumaDB import. They detect
+// SQLite files whose core tables predate `scope_id`, move the file set aside,
+// and preserve legacy secret routing rows for the fresh scoped database.
 
 import { afterEach, beforeEach, describe, expect, it } from "@effect/vitest";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   importLegacySecrets,
@@ -136,13 +134,11 @@ describe("moveAsidePreScopeDb", () => {
     expect(existsSync(path)).toBe(true);
   });
 
-  it("is a no-op when the DB doesn't exist yet (fresh install)", () => {
+  it("is a no-op when the DB doesn't exist yet", () => {
     expect(moveAsidePreScopeDb(join(workDir, "missing.db"))).toBeNull();
   });
 });
 
-// Integration: the whole reason this helper exists — a pre-scope DB
-// must be recoverable via fresh drizzle migrations after the move.
 describe("move-aside + fresh migrate end-to-end", () => {
   it("lets migrations run cleanly after an old DB is moved aside", () => {
     const path = join(workDir, "data.db");
@@ -153,14 +149,13 @@ describe("move-aside + fresh migrate end-to-end", () => {
 
     const db = new Database(path);
     migrate(drizzle(db), {
-      migrationsFolder: join(__dirname, "../../drizzle"),
+      migrationsFolder: join(import.meta.dirname, "../../drizzle"),
     });
-    // migrate() should have produced the new schema — source now has scope_id.
     const cols = db.prepare("PRAGMA table_info('source')").all() as ReadonlyArray<{
       readonly name: string;
     }>;
-    expect(cols.some((c) => c.name === "scope_id")).toBe(true);
     db.close();
+    expect(cols.some((c) => c.name === "scope_id")).toBe(true);
   });
 });
 
@@ -173,13 +168,13 @@ describe("readLegacySecrets", () => {
       "sec_1",
       "GitHub Token",
       "onepassword",
-      1700000000,
+      1_700_000_000,
     );
     db.prepare("INSERT INTO secret (id, name, provider, created_at) VALUES (?, ?, ?, ?)").run(
       "sec_2",
       "Stripe",
       "keychain",
-      1700000001,
+      1_700_000_001,
     );
     db.close();
 
@@ -189,7 +184,7 @@ describe("readLegacySecrets", () => {
       id: "sec_1",
       name: "GitHub Token",
       provider: "onepassword",
-      createdAt: 1700000000,
+      createdAt: 1_700_000_000,
     });
   });
 
@@ -205,7 +200,6 @@ describe("readLegacySecrets", () => {
 });
 
 describe("importLegacySecrets", () => {
-  // Set up a fresh DB with the new (scoped) `secret` shape to import into.
   const createScopedDb = (path: string): Database => {
     const db = new Database(path);
     db.exec(`
@@ -256,8 +250,6 @@ describe("importLegacySecrets", () => {
     const db = createScopedDb(path);
     const rows = [{ id: "sec_1", name: "GH", provider: "onepassword", createdAt: 1 }];
     importLegacySecrets(db, "scope_a", rows);
-    // If the user's already re-registered the secret via a different
-    // provider, the legacy row must NOT clobber it.
     db.prepare(
       "UPDATE secret SET provider = 'file' WHERE id = 'sec_1' AND scope_id = 'scope_a'",
     ).run();

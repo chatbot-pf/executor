@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import { createExecutor } from "./promise";
-import { definePlugin, defineSchema, tool } from "./plugin";
+import { definePlugin, tool } from "./plugin";
 import { Effect, Schema } from "effect";
 
 // A minimal static-tool plugin built on the Effect surface, consumed
@@ -9,7 +9,7 @@ import { Effect, Schema } from "effect";
 // nested methods (executor.tools.*) and plugin extensions.
 const echoPlugin = definePlugin(() => ({
   id: "echo" as const,
-  schema: defineSchema({}),
+  schema: {},
   storage: () => ({}),
   staticSources: () => [
     {
@@ -35,8 +35,9 @@ const echoPlugin = definePlugin(() => ({
 
 describe("promise/createExecutor", () => {
   it("returns Promise-shaped executor and invokes static tools", async () => {
+    const plugins = [echoPlugin()] as const;
     const executor = await createExecutor({
-      plugins: [echoPlugin()] as const,
+      plugins,
       onElicitation: "accept-all",
     });
 
@@ -50,8 +51,9 @@ describe("promise/createExecutor", () => {
   });
 
   it("promisifies plugin extension methods", async () => {
+    const plugins = [echoPlugin()] as const;
     const executor = await createExecutor({
-      plugins: [echoPlugin()] as const,
+      plugins,
       onElicitation: "accept-all",
     });
 
@@ -68,7 +70,7 @@ describe("promise/createExecutor", () => {
     // wrapped invocation error.
     const approvedPlugin = definePlugin(() => ({
       id: "ap" as const,
-      schema: defineSchema({}),
+      schema: {},
       storage: () => ({}),
       staticSources: () => [
         {
@@ -90,8 +92,9 @@ describe("promise/createExecutor", () => {
       ],
     }));
 
+    const plugins = [approvedPlugin()] as const;
     const executor = await createExecutor({
-      plugins: [approvedPlugin()] as const,
+      plugins,
       onElicitation: "accept-all", // default → auto-approve
     });
 
@@ -107,7 +110,7 @@ describe("promise/createExecutor", () => {
         "ap.ctl.go",
         {},
         {
-          onElicitation: () => Effect.succeed({ action: "decline" as const }) as any,
+          onElicitation: async () => ({ action: "decline" as const }),
         },
       ),
     ).rejects.toMatchObject({

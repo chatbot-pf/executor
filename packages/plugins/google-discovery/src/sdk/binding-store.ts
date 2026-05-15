@@ -1,6 +1,5 @@
 // ---------------------------------------------------------------------------
-// Google Discovery plugin store — typed adapter over the plugin's own
-// schema. Operates on two tables:
+// Google Discovery plugin store over FumaDB. Operates on two primary tables:
 //
 //   google_discovery_source         — per-namespace source config blob
 //   google_discovery_binding        — per-tool-id method binding
@@ -10,12 +9,21 @@
 //
 // All JSON columns are round-tripped via Schema.encode/decode so `Option`
 // shapes inside GoogleDiscoveryStoredSourceData / GoogleDiscoveryMethodBinding
-// survive adapter serialization.
+// survive storage serialization.
 // ---------------------------------------------------------------------------
 
 import { Effect, Option, Schema } from "effect";
 
-import { defineSchema, type StorageDeps, type StorageFailure } from "@executor-js/sdk/core";
+import {
+  dateColumn,
+  type FumaTables,
+  jsonColumn,
+  nullableTextColumn,
+  scopedExecutorTable,
+  type StorageDeps,
+  type StorageFailure,
+  textColumn,
+} from "@executor-js/sdk/core";
 
 import {
   GoogleDiscoveryMethodBinding,
@@ -35,74 +43,50 @@ export const GOOGLE_DISCOVERY_OAUTH_SESSION_TTL_MS = 15 * 60 * 1000;
 // Schema — plugin-declared tables merged with coreSchema at executor start.
 // ---------------------------------------------------------------------------
 
-export const googleDiscoverySchema = defineSchema({
-  google_discovery_source: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      name: { type: "string", required: true },
-      // Plugin-private structural config minus auth/credentials —
-      // discoveryUrl, service, version, rootUrl, servicePath. These
-      // never carry refs.
-      config: { type: "json", required: true },
-      // Flattened GoogleDiscoveryAuth.
-      auth_kind: {
-        type: ["none", "oauth2"],
-        required: true,
-        defaultValue: "none",
-      },
-      auth_connection_id: { type: "string", required: false, index: true },
-      auth_client_id_secret_id: {
-        type: "string",
-        required: false,
-        index: true,
-      },
-      auth_client_secret_secret_id: {
-        type: "string",
-        required: false,
-        index: true,
-      },
-      // Stored as a string[] (JSON-backed but not a ref-bearing column).
-      // Empty array when auth_kind is "none".
-      auth_scopes: { type: "string[]", required: false },
-      created_at: { type: "date", required: true },
-      updated_at: { type: "date", required: true },
+export const googleDiscoverySchema = {
+  google_discovery_source: scopedExecutorTable("google_discovery_source", {
+    name: textColumn("name"),
+    // Plugin-private structural config minus auth/credentials —
+    // discoveryUrl, service, version, rootUrl, servicePath. These
+    // never carry refs.
+    config: jsonColumn("config"),
+    auth_kind: textColumn("auth_kind").defaultTo("none"),
+    auth_connection_id: nullableTextColumn("auth_connection_id"),
+    auth_client_id_secret_id: nullableTextColumn("auth_client_id_secret_id"),
+    auth_client_secret_secret_id: nullableTextColumn("auth_client_secret_secret_id"),
+    // Stored as JSON because it is a string[] and carries no refs.
+    auth_scopes: jsonColumn("auth_scopes").nullable(),
+    created_at: dateColumn("created_at"),
+    updated_at: dateColumn("updated_at"),
+  }),
+  google_discovery_source_credential_header: scopedExecutorTable(
+    "google_discovery_source_credential_header",
+    {
+      source_id: textColumn("source_id"),
+      name: textColumn("name"),
+      kind: textColumn("kind"),
+      text_value: nullableTextColumn("text_value"),
+      secret_id: nullableTextColumn("secret_id"),
+      secret_prefix: nullableTextColumn("secret_prefix"),
     },
-  },
-  google_discovery_source_credential_header: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      source_id: { type: "string", required: true, index: true },
-      name: { type: "string", required: true },
-      kind: { type: ["text", "secret"], required: true },
-      text_value: { type: "string", required: false },
-      secret_id: { type: "string", required: false, index: true },
-      secret_prefix: { type: "string", required: false },
+  ),
+  google_discovery_source_credential_query_param: scopedExecutorTable(
+    "google_discovery_source_credential_query_param",
+    {
+      source_id: textColumn("source_id"),
+      name: textColumn("name"),
+      kind: textColumn("kind"),
+      text_value: nullableTextColumn("text_value"),
+      secret_id: nullableTextColumn("secret_id"),
+      secret_prefix: nullableTextColumn("secret_prefix"),
     },
-  },
-  google_discovery_source_credential_query_param: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      source_id: { type: "string", required: true, index: true },
-      name: { type: "string", required: true },
-      kind: { type: ["text", "secret"], required: true },
-      text_value: { type: "string", required: false },
-      secret_id: { type: "string", required: false, index: true },
-      secret_prefix: { type: "string", required: false },
-    },
-  },
-  google_discovery_binding: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      source_id: { type: "string", required: true, index: true },
-      binding: { type: "json", required: true },
-      created_at: { type: "date", required: true },
-    },
-  },
-});
+  ),
+  google_discovery_binding: scopedExecutorTable("google_discovery_binding", {
+    source_id: textColumn("source_id"),
+    binding: jsonColumn("binding"),
+    created_at: dateColumn("created_at"),
+  }),
+} satisfies FumaTables;
 
 export type GoogleDiscoverySchema = typeof googleDiscoverySchema;
 
@@ -113,8 +97,7 @@ export type GoogleDiscoverySchema = typeof googleDiscoverySchema;
 export interface GoogleDiscoveryStoredSource {
   readonly namespace: string;
   /** Executor scope id this source row lives in. Writes stamp this on
-   *  `scope_id`; reads return whichever scope's row the adapter's
-   *  fall-through walk surfaced first. */
+   *  `scope_id`; reads choose scope explicitly in the FumaDB query. */
   readonly scope: string;
   readonly name: string;
   readonly config: GoogleDiscoveryStoredSourceData;
@@ -145,12 +128,10 @@ const decodeJson = (value: unknown): unknown => {
 
 interface AuthColumns {
   readonly auth_kind: "none" | "oauth2";
-  readonly auth_connection_id?: string;
-  readonly auth_client_id_secret_id?: string;
-  readonly auth_client_secret_secret_id?: string;
-  // Mutable rather than readonly so the typed adapter's RowInput shape
-  // (which expects `string[]`, not `readonly string[]`) is satisfied.
-  readonly auth_scopes?: string[];
+  readonly auth_connection_id: string | null;
+  readonly auth_client_id_secret_id: string | null;
+  readonly auth_client_secret_secret_id: string | null;
+  readonly auth_scopes: string[];
 }
 
 const authToColumns = (auth: GoogleDiscoveryAuth): AuthColumns => {
@@ -159,11 +140,17 @@ const authToColumns = (auth: GoogleDiscoveryAuth): AuthColumns => {
       auth_kind: "oauth2",
       auth_connection_id: auth.connectionId,
       auth_client_id_secret_id: auth.clientIdSecretId,
-      auth_client_secret_secret_id: auth.clientSecretSecretId ?? undefined,
+      auth_client_secret_secret_id: auth.clientSecretSecretId ?? null,
       auth_scopes: [...auth.scopes],
     };
   }
-  return { auth_kind: "none" };
+  return {
+    auth_kind: "none",
+    auth_connection_id: null,
+    auth_client_id_secret_id: null,
+    auth_client_secret_secret_id: null,
+    auth_scopes: [],
+  };
 };
 
 const columnsToAuth = (row: Record<string, unknown>): GoogleDiscoveryAuth => {
@@ -173,7 +160,10 @@ const columnsToAuth = (row: Record<string, unknown>): GoogleDiscoveryAuth => {
     typeof row.auth_client_id_secret_id === "string"
   ) {
     const csec = row.auth_client_secret_secret_id as string | null | undefined;
-    const scopes = (row.auth_scopes as readonly string[] | null | undefined) ?? [];
+    const rawScopes = decodeJson(row.auth_scopes);
+    const scopes = Array.isArray(rawScopes)
+      ? rawScopes.filter((item): item is string => typeof item === "string")
+      : [];
     return {
       kind: "oauth2",
       connectionId: row.auth_connection_id,
@@ -249,22 +239,9 @@ const rowsToValueMap = (
 // Store interface
 // ---------------------------------------------------------------------------
 
-// Every method routes through the typed adapter (`ctx.storage.adapter`)
-// so the typed error channel is `StorageFailure`. Schema-decode failures
-// inside `Effect.gen` land as defects, not typed errors, and are caught
-// by the HTTP edge's observability middleware.
-//
 // Every read/write that targets a single keyed row pins BOTH the natural
-// id (toolId, sourceId, sessionId) AND the owning `scope_id`. The store
-// runs behind the scoped adapter (which auto-injects `scope_id IN
-// (stack)`), so a bare `{id}` filter resolves to any matching row in the
-// stack in adapter-iteration order. For shadowed rows (same id at
-// multiple scopes — e.g. an org-level google discovery source with a
-// per-user override), that's a scope-isolation bug: updates and deletes
-// can land on the wrong scope's row. Callers thread the resolved scope
-// in (typically `path.scopeId` for HTTP, `toolRow.scope_id` /
-// `input.scope` for invokeTool/lifecycle) so every keyed mutation
-// targets exactly one row.
+// id (toolId, sourceId, sessionId) AND the owning `scope_id`. Scope is a
+// normal FumaDB predicate here, not hidden behavior.
 export interface GoogleDiscoveryStore {
   readonly getBinding: (
     toolId: string,
@@ -357,18 +334,16 @@ export interface GoogleDiscoveryStore {
 export const makeGoogleDiscoveryStore = (
   deps: StorageDeps<GoogleDiscoverySchema>,
 ): GoogleDiscoveryStore => {
-  const db = deps.adapter;
+  const { fuma } = deps;
 
   return {
     getBinding: (toolId, scope) =>
       Effect.gen(function* () {
-        const row = yield* db.findOne({
-          model: "google_discovery_binding",
-          where: [
-            { field: "id", value: toolId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const row = yield* fuma.use("google_discovery_binding.findFirstByScopedId", (db) =>
+          db.findFirst("google_discovery_binding", {
+            where: (b) => b.and(b("id", "=", toolId), b("scope_id", "=", scope)),
+          }),
+        );
         if (!row) return null;
         const decoded = decodeBinding(decodeJson(row.binding));
         return { namespace: decodeString(row.source_id), binding: decoded };
@@ -376,59 +351,45 @@ export const makeGoogleDiscoveryStore = (
 
     putBinding: (toolId, sourceId, scope, binding) =>
       Effect.gen(function* () {
-        // Upsert: delete + insert. The in-memory adapter accepts
-        // overwriting via create; real SQL backends would fail without
-        // the explicit delete. Pin the delete to the target scope so a
-        // shadowed row at another scope in the stack isn't wiped.
-        yield* db.delete({
-          model: "google_discovery_binding",
-          where: [
-            { field: "id", value: toolId },
-            { field: "scope_id", value: scope },
-          ],
-        });
-        yield* db.create({
-          model: "google_discovery_binding",
-          data: {
+        yield* fuma.use("google_discovery_binding.deleteManyByScopedId", (db) =>
+          db.deleteMany("google_discovery_binding", {
+            where: (b) => b.and(b("id", "=", toolId), b("scope_id", "=", scope)),
+          }),
+        );
+        yield* fuma.use("google_discovery_binding.create", (db) =>
+          db.create("google_discovery_binding", {
             id: toolId,
             scope_id: scope,
             source_id: sourceId,
             binding: toJsonRecord(encodeBinding(binding)),
             created_at: new Date(),
-          },
-          forceAllowId: true,
-        });
+          }),
+        );
       }),
 
     removeBindingsBySource: (sourceId, scope) =>
       Effect.gen(function* () {
-        const rows = yield* db.findMany({
-          model: "google_discovery_binding",
-          where: [
-            { field: "source_id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const rows = yield* fuma.use("google_discovery_binding.findManyBySourceScope", (db) =>
+          db.findMany("google_discovery_binding", {
+            where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+        );
         const ids = rows.map((r) => decodeString(r.id));
-        yield* db.deleteMany({
-          model: "google_discovery_binding",
-          where: [
-            { field: "source_id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        yield* fuma.use("google_discovery_binding.deleteManyBySourceScope", (db) =>
+          db.deleteMany("google_discovery_binding", {
+            where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+        );
         return ids;
       }),
 
     getBindingsForSource: (sourceId, scope) =>
       Effect.gen(function* () {
-        const rows = yield* db.findMany({
-          model: "google_discovery_binding",
-          where: [
-            { field: "source_id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const rows = yield* fuma.use("google_discovery_binding.findManyBySourceScope", (db) =>
+          db.findMany("google_discovery_binding", {
+            where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+        );
         const out = new Map<string, GoogleDiscoveryMethodBinding>();
         for (const row of rows) {
           out.set(decodeString(row.id), decodeBinding(decodeJson(row.binding)));
@@ -441,21 +402,18 @@ export const makeGoogleDiscoveryStore = (
         const now = new Date();
         // Wipe the source row + every child row before recreating —
         // matches putSource's "fully replace" semantic.
-        yield* db.delete({
-          model: "google_discovery_source",
-          where: [
-            { field: "id", value: source.namespace },
-            { field: "scope_id", value: source.scope },
-          ],
-        });
+        yield* fuma.use("google_discovery_source.deleteManyByScopedId", (db) =>
+          db.deleteMany("google_discovery_source", {
+            where: (b) => b.and(b("id", "=", source.namespace), b("scope_id", "=", source.scope)),
+          }),
+        );
         yield* deleteSourceChildren(source.namespace, source.scope);
 
         const encoded = stripExtractedFields(
           decodeJsonObject(encodeStoredSourceData(source.config)),
         );
-        yield* db.create({
-          model: "google_discovery_source",
-          data: {
+        yield* fuma.use("google_discovery_source.create", (db) =>
+          db.create("google_discovery_source", {
             id: source.namespace,
             scope_id: source.scope,
             name: source.name,
@@ -463,58 +421,49 @@ export const makeGoogleDiscoveryStore = (
             created_at: now,
             updated_at: now,
             ...authToColumns(source.config.auth),
-          },
-          forceAllowId: true,
-        });
+          }),
+        );
         yield* writeCredentialRows(source.namespace, source.scope, source.config.credentials);
       }),
 
     updateSourceMeta: (sourceId, scope, update) =>
       Effect.gen(function* () {
-        const row = yield* db.findOne({
-          model: "google_discovery_source",
-          where: [
-            { field: "id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const row = yield* fuma.use("google_discovery_source.findFirstByScopedId", (db) =>
+          db.findFirst("google_discovery_source", {
+            where: (b) => b.and(b("id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+        );
         if (!row) return;
         const auth = update.auth ?? columnsToAuth(row);
-        yield* db.update({
-          model: "google_discovery_source",
-          where: [
-            { field: "id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-          update: {
-            name: update.name ?? decodeString(row.name),
-            updated_at: new Date(),
-            ...authToColumns(auth),
-          },
-        });
+        yield* fuma.use("google_discovery_source.updateManyByScopedId", (db) =>
+          db.updateMany("google_discovery_source", {
+            where: (b) => b.and(b("id", "=", sourceId), b("scope_id", "=", scope)),
+            set: {
+              name: update.name ?? decodeString(row.name),
+              updated_at: new Date(),
+              ...authToColumns(auth),
+            },
+          }),
+        );
       }),
 
     removeSource: (sourceId, scope) =>
       Effect.gen(function* () {
         yield* deleteSourceChildren(sourceId, scope);
-        yield* db.delete({
-          model: "google_discovery_source",
-          where: [
-            { field: "id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        yield* fuma.use("google_discovery_source.deleteManyByScopedId", (db) =>
+          db.deleteMany("google_discovery_source", {
+            where: (b) => b.and(b("id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+        );
       }),
 
     getSource: (sourceId, scope) =>
       Effect.gen(function* () {
-        const row = yield* db.findOne({
-          model: "google_discovery_source",
-          where: [
-            { field: "id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const row = yield* fuma.use("google_discovery_source.findFirstByScopedId", (db) =>
+          db.findFirst("google_discovery_source", {
+            where: (b) => b.and(b("id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+        );
         if (!row) return null;
         return {
           namespace: decodeString(row.id),
@@ -526,13 +475,11 @@ export const makeGoogleDiscoveryStore = (
 
     getSourceConfig: (sourceId, scope) =>
       Effect.gen(function* () {
-        const row = yield* db.findOne({
-          model: "google_discovery_source",
-          where: [
-            { field: "id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const row = yield* fuma.use("google_discovery_source.findFirstByScopedId", (db) =>
+          db.findFirst("google_discovery_source", {
+            where: (b) => b.and(b("id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+        );
         if (!row) return null;
         return yield* hydrateStoredSourceData(row, sourceId, scope);
       }),
@@ -541,14 +488,16 @@ export const makeGoogleDiscoveryStore = (
       Effect.gen(function* () {
         const [byClientId, byClientSecret] = yield* Effect.all(
           [
-            db.findMany({
-              model: "google_discovery_source",
-              where: [{ field: "auth_client_id_secret_id", value: secretId }],
-            }),
-            db.findMany({
-              model: "google_discovery_source",
-              where: [{ field: "auth_client_secret_secret_id", value: secretId }],
-            }),
+            fuma.use("google_discovery_source.findManyByClientIdSecret", (db) =>
+              db.findMany("google_discovery_source", {
+                where: (b) => b("auth_client_id_secret_id", "=", secretId),
+              }),
+            ),
+            fuma.use("google_discovery_source.findManyByClientSecretSecret", (db) =>
+              db.findMany("google_discovery_source", {
+                where: (b) => b("auth_client_secret_secret_id", "=", secretId),
+              }),
+            ),
           ],
           { concurrency: "unbounded" },
         );
@@ -578,11 +527,12 @@ export const makeGoogleDiscoveryStore = (
       }),
 
     findSourcesByConnection: (connectionId) =>
-      db
-        .findMany({
-          model: "google_discovery_source",
-          where: [{ field: "auth_connection_id", value: connectionId }],
-        })
+      fuma
+        .use("google_discovery_source.findManyByConnection", (db) =>
+          db.findMany("google_discovery_source", {
+            where: (b) => b("auth_connection_id", "=", connectionId),
+          }),
+        )
         .pipe(
           Effect.map((rows) =>
             rows.map((r) => ({
@@ -598,14 +548,16 @@ export const makeGoogleDiscoveryStore = (
       Effect.gen(function* () {
         const [headers, params] = yield* Effect.all(
           [
-            db.findMany({
-              model: "google_discovery_source_credential_header",
-              where: [{ field: "secret_id", value: secretId }],
-            }),
-            db.findMany({
-              model: "google_discovery_source_credential_query_param",
-              where: [{ field: "secret_id", value: secretId }],
-            }),
+            fuma.use("google_discovery_source_credential_header.findManyBySecret", (db) =>
+              db.findMany("google_discovery_source_credential_header", {
+                where: (b) => b("secret_id", "=", secretId),
+              }),
+            ),
+            fuma.use("google_discovery_source_credential_query_param.findManyBySecret", (db) =>
+              db.findMany("google_discovery_source_credential_query_param", {
+                where: (b) => b("secret_id", "=", secretId),
+              }),
+            ),
           ],
           { concurrency: "unbounded" },
         );
@@ -628,7 +580,9 @@ export const makeGoogleDiscoveryStore = (
     lookupSourceNames: (keys) =>
       Effect.gen(function* () {
         if (keys.length === 0) return new Map<string, string>();
-        const rows = yield* db.findMany({ model: "google_discovery_source" });
+        const rows = yield* fuma.use("google_discovery_source.findMany", (db) =>
+          db.findMany("google_discovery_source"),
+        );
         const requested = new Set(keys);
         const out = new Map<string, string>();
         for (const r of rows) {
@@ -640,7 +594,7 @@ export const makeGoogleDiscoveryStore = (
   };
 
   // ---------------------------------------------------------------------
-  // Closure helpers (depend on `db`).
+  // Closure helpers (depend on `fuma`).
   // ---------------------------------------------------------------------
 
   function deleteSourceChildren(sourceId: string, scope: string) {
@@ -653,13 +607,11 @@ export const makeGoogleDiscoveryStore = (
         "google_discovery_source_credential_header",
         "google_discovery_source_credential_query_param",
       ] as const) {
-        yield* db.deleteMany({
-          model,
-          where: [
-            { field: "source_id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        yield* fuma.use(`${model}.deleteManyBySourceScope`, (db) =>
+          db.deleteMany(model, {
+            where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+        );
       }
     });
   }
@@ -673,19 +625,19 @@ export const makeGoogleDiscoveryStore = (
       if (!credentials) return;
       const headerRows = valueMapToRows(sourceId, scope, credentials.headers);
       if (headerRows.length > 0) {
-        yield* db.createMany({
-          model: "google_discovery_source_credential_header",
-          data: headerRows,
-          forceAllowId: true,
-        });
+        yield* fuma
+          .use("google_discovery_source_credential_header.createMany", (db) =>
+            db.createMany("google_discovery_source_credential_header", [...headerRows]),
+          )
+          .pipe(Effect.asVoid);
       }
       const paramRows = valueMapToRows(sourceId, scope, credentials.queryParams);
       if (paramRows.length > 0) {
-        yield* db.createMany({
-          model: "google_discovery_source_credential_query_param",
-          data: paramRows,
-          forceAllowId: true,
-        });
+        yield* fuma
+          .use("google_discovery_source_credential_query_param.createMany", (db) =>
+            db.createMany("google_discovery_source_credential_query_param", [...paramRows]),
+          )
+          .pipe(Effect.asVoid);
       }
     });
   }
@@ -697,20 +649,20 @@ export const makeGoogleDiscoveryStore = (
   ): Effect.Effect<GoogleDiscoveryStoredSourceData, StorageFailure> {
     return Effect.gen(function* () {
       const partial = decodeJsonObject(decodeJson(row.config));
-      const headerRows = yield* db.findMany({
-        model: "google_discovery_source_credential_header",
-        where: [
-          { field: "source_id", value: sourceId },
-          { field: "scope_id", value: scope },
-        ],
-      });
-      const paramRows = yield* db.findMany({
-        model: "google_discovery_source_credential_query_param",
-        where: [
-          { field: "source_id", value: sourceId },
-          { field: "scope_id", value: scope },
-        ],
-      });
+      const headerRows = yield* fuma.use(
+        "google_discovery_source_credential_header.findManyBySourceScope",
+        (db) =>
+          db.findMany("google_discovery_source_credential_header", {
+            where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+      );
+      const paramRows = yield* fuma.use(
+        "google_discovery_source_credential_query_param.findManyBySourceScope",
+        (db) =>
+          db.findMany("google_discovery_source_credential_query_param", {
+            where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+      );
       const headers = rowsToValueMap(headerRows);
       const queryParams = rowsToValueMap(paramRows);
       const credentials =

@@ -1,15 +1,15 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import z from "zod";
 
 import {
   createExecutor,
-  makeTestConfig,
   FormElicitation,
   ElicitationResponse,
   type InvokeOptions,
 } from "@executor-js/sdk";
+import { makeTestConfig } from "@executor-js/sdk/testing";
 
 import { mcpPlugin } from "./plugin";
 import { serveMcpServer } from "../testing";

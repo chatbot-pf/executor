@@ -1,16 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Predicate, Result } from "effect";
+import { withQueryContext } from "fumadb/query";
 
-import { makeMemoryAdapter } from "@executor-js/storage-core/testing/memory";
-
-import { makeInMemoryBlobStore } from "./blob";
 import { CreateConnectionInput, TokenMaterial } from "./connections";
-import { collectSchemas, createExecutor, type Executor } from "./executor";
-import type { CredentialBindingRow } from "./core-schema";
+import { createExecutor, type Executor } from "./executor";
 import { ConnectionId, ScopeId, SecretId } from "./ids";
 import { definePlugin, type AnyPlugin } from "./plugin";
 import { Scope } from "./scope";
 import { RemoveSecretInput, SetSecretInput, type SecretProvider } from "./secrets";
+import { makeTestConfig } from "./testing";
 
 const TEST_PLUGIN_ID = "credentialTest";
 const TEST_SOURCE_ID = "shared-api";
@@ -87,22 +85,23 @@ const makeHarness = () => {
     memoryConnectionPlugin(),
     credentialTestPlugin(),
   ] as const;
-  const adapter = makeMemoryAdapter({ schema: collectSchemas(plugins) });
-  const blobs = makeInMemoryBlobStore();
+  const config = makeTestConfig({ plugins });
   const create = <const TPlugins extends readonly AnyPlugin[]>(
     visibleScopes: readonly Scope[],
     configuredPlugins: TPlugins,
   ) =>
     createExecutor({
+      ...config,
       scopes: visibleScopes,
-      adapter,
-      blobs,
       plugins: configuredPlugins,
       onElicitation: "accept-all",
     });
 
   return {
-    adapter,
+    dbFor: (visibleScopes: readonly Scope[]) =>
+      withQueryContext(config.db, {
+        allowedScopeIds: new Set(visibleScopes.map((visibleScope) => String(visibleScope.id))),
+      }),
     scopes,
     create: (visibleScopes: readonly Scope[]) => create(visibleScopes, plugins),
   };
@@ -308,9 +307,8 @@ describe("credential bindings", () => {
       yield* setSecret(userExecutor, harness.scopes.org.id, "api-token", "sk-org");
 
       const migratedAt = new Date("2026-05-01T00:00:00.000Z");
-      yield* harness.adapter.create({
-        model: "credential_binding",
-        data: {
+      yield* Effect.promise(() =>
+        harness.dbFor([harness.scopes.org]).create("credential_binding", {
           id: "invalid-outer-binding",
           scope_id: harness.scopes.org.id,
           plugin_id: TEST_PLUGIN_ID,
@@ -323,9 +321,8 @@ describe("credential bindings", () => {
           connection_id: undefined,
           created_at: migratedAt,
           updated_at: migratedAt,
-        },
-        forceAllowId: true,
-      });
+        }),
+      );
 
       const resolved = yield* userExecutor.credentialBindings.resolve({
         pluginId: TEST_PLUGIN_ID,
@@ -526,9 +523,8 @@ describe("credential bindings", () => {
       yield* setSecret(userExecutor, harness.scopes.userWorkspaceA.id, "new-token", "sk-new");
 
       const migratedAt = new Date("2026-05-01T00:00:00.000Z");
-      yield* harness.adapter.create({
-        model: "credential_binding",
-        data: {
+      yield* Effect.promise(() =>
+        harness.dbFor([harness.scopes.userWorkspaceA]).create("credential_binding", {
           id: "openapi-source-binding:legacy-row-id",
           scope_id: harness.scopes.userWorkspaceA.id,
           plugin_id: TEST_PLUGIN_ID,
@@ -541,9 +537,8 @@ describe("credential bindings", () => {
           connection_id: undefined,
           created_at: migratedAt,
           updated_at: migratedAt,
-        },
-        forceAllowId: true,
-      });
+        }),
+      );
 
       const updated = yield* userExecutor.credentialBindings.set({
         targetScope: harness.scopes.userWorkspaceA.id,
@@ -554,16 +549,18 @@ describe("credential bindings", () => {
         value: { kind: "secret", secretId: SecretId.make("new-token") },
       });
 
-      const rawRows = yield* harness.adapter.findMany<CredentialBindingRow>({
-        model: "credential_binding",
-        where: [
-          { field: "scope_id", value: harness.scopes.userWorkspaceA.id },
-          { field: "plugin_id", value: TEST_PLUGIN_ID },
-          { field: "source_id", value: TEST_SOURCE_ID },
-          { field: "source_scope_id", value: harness.scopes.org.id },
-          { field: "slot_key", value: TEST_SLOT },
-        ],
-      });
+      const rawRows = yield* Effect.promise(() =>
+        harness.dbFor([harness.scopes.userWorkspaceA]).findMany("credential_binding", {
+          where: (b) =>
+            b.and(
+              b("scope_id", "=", harness.scopes.userWorkspaceA.id),
+              b("plugin_id", "=", TEST_PLUGIN_ID),
+              b("source_id", "=", TEST_SOURCE_ID),
+              b("source_scope_id", "=", harness.scopes.org.id),
+              b("slot_key", "=", TEST_SLOT),
+            ),
+        }),
+      );
 
       expect(rawRows).toHaveLength(1);
       expect(rawRows[0]?.id).toBe(updated.id);
@@ -760,21 +757,18 @@ describe("credential bindings", () => {
           memoryConnectionPlugin(),
           credentialTestPlugin(),
         ] as const;
-        const adapter = makeMemoryAdapter({ schema: collectSchemas(plugins) });
-        const blobs = makeInMemoryBlobStore();
+        const config = makeTestConfig({ plugins });
         const orgExecutor = yield* createExecutor({
+          ...config,
           scopes: [scopes.org],
-          adapter,
-          blobs,
           plugins,
           onElicitation: "accept-all",
         });
         yield* orgExecutor.credentialTest.registerSource(scopes.org.id);
 
         const userExecutor = yield* createExecutor({
+          ...config,
           scopes: [scopes.userA, scopes.org],
-          adapter,
-          blobs,
           plugins,
           onElicitation: "accept-all",
         });

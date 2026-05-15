@@ -1,9 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Predicate } from "effect";
 
-import { makeMemoryAdapter } from "@executor-js/storage-core/testing/memory";
-
-import { makeInMemoryBlobStore } from "./blob";
 import {
   ConnectionRefreshError,
   CreateConnectionInput,
@@ -14,7 +11,7 @@ import {
   type ConnectionRefreshInput,
   type ConnectionRefreshResult,
 } from "./connections";
-import { collectSchemas, createExecutor } from "./executor";
+import { createExecutor } from "./executor";
 import { ConnectionId, ScopeId, SecretId } from "./ids";
 import { definePlugin } from "./plugin";
 import { Scope } from "./scope";
@@ -849,9 +846,7 @@ const makeLayeredConnExecutors = () =>
   Effect.gen(function* () {
     const { provider } = makeConnectionProvider({ key: "spotify" });
     const plugins = [memorySecretsPlugin(), connPlugin(provider)] as const;
-    const schema = collectSchemas(plugins);
-    const adapter = makeMemoryAdapter({ schema });
-    const blobs = makeInMemoryBlobStore();
+    const config = makeTestConfig({ plugins });
 
     const outerId = scpid("org");
     const innerId = scpid("user-org:u1:org");
@@ -867,16 +862,14 @@ const makeLayeredConnExecutors = () =>
     });
 
     const execOuter = yield* createExecutor({
+      ...config,
       scopes: [outerScope],
-      adapter,
-      blobs,
       plugins,
       onElicitation: "accept-all",
     });
     const execInner = yield* createExecutor({
+      ...config,
       scopes: [innerScope, outerScope],
-      adapter,
-      blobs,
       plugins,
       onElicitation: "accept-all",
     });
@@ -1005,9 +998,7 @@ describe("connections — multi-scope behaviour", () => {
           }),
       };
       const plugins = [memorySecretsPlugin(secretProvider), connPlugin(provider)] as const;
-      const schema = collectSchemas(plugins);
-      const adapter = makeMemoryAdapter({ schema });
-      const blobs = makeInMemoryBlobStore();
+      const config = makeTestConfig({ plugins });
 
       const outerId = scpid("org");
       const innerId = scpid("user-org:u1:org");
@@ -1023,16 +1014,14 @@ describe("connections — multi-scope behaviour", () => {
       });
 
       const execOuter = yield* createExecutor({
+        ...config,
         scopes: [outerScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const execInner = yield* createExecutor({
+        ...config,
         scopes: [innerScope, outerScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });

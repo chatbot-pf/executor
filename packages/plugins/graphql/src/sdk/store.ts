@@ -2,9 +2,13 @@ import { Effect, Schema } from "effect";
 
 import {
   ConfiguredCredentialBinding,
-  defineSchema,
+  type FumaTables,
+  jsonColumn,
+  nullableTextColumn,
+  scopedExecutorTable,
   type StorageDeps,
   type StorageFailure,
+  textColumn,
 } from "@executor-js/sdk/core";
 
 import {
@@ -28,63 +32,34 @@ import {
 //     internal opaque data).
 // ---------------------------------------------------------------------------
 
-export const graphqlSchema = defineSchema({
-  graphql_source: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      name: { type: "string", required: true },
-      endpoint: { type: "string", required: true },
-      auth_kind: {
-        type: ["none", "oauth2"],
-        required: true,
-        defaultValue: "none",
-      },
-      auth_connection_slot: {
-        type: "string",
-        required: false,
-      },
-    },
-  },
-  graphql_source_header: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      source_id: { type: "string", required: true, index: true },
-      name: { type: "string", required: true },
-      kind: {
-        type: ["text", "binding"],
-        required: true,
-      },
-      text_value: { type: "string", required: false },
-      slot_key: { type: "string", required: false },
-      prefix: { type: "string", required: false },
-    },
-  },
-  graphql_source_query_param: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      source_id: { type: "string", required: true, index: true },
-      name: { type: "string", required: true },
-      kind: {
-        type: ["text", "binding"],
-        required: true,
-      },
-      text_value: { type: "string", required: false },
-      slot_key: { type: "string", required: false },
-      prefix: { type: "string", required: false },
-    },
-  },
-  graphql_operation: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      source_id: { type: "string", required: true, index: true },
-      binding: { type: "json", required: true },
-    },
-  },
-});
+export const graphqlSchema = {
+  graphql_source: scopedExecutorTable("graphql_source", {
+    name: textColumn("name"),
+    endpoint: textColumn("endpoint"),
+    auth_kind: textColumn("auth_kind").defaultTo("none"),
+    auth_connection_slot: nullableTextColumn("auth_connection_slot"),
+  }),
+  graphql_source_header: scopedExecutorTable("graphql_source_header", {
+    source_id: textColumn("source_id"),
+    name: textColumn("name"),
+    kind: textColumn("kind"),
+    text_value: nullableTextColumn("text_value"),
+    slot_key: nullableTextColumn("slot_key"),
+    prefix: nullableTextColumn("prefix"),
+  }),
+  graphql_source_query_param: scopedExecutorTable("graphql_source_query_param", {
+    source_id: textColumn("source_id"),
+    name: textColumn("name"),
+    kind: textColumn("kind"),
+    text_value: nullableTextColumn("text_value"),
+    slot_key: nullableTextColumn("slot_key"),
+    prefix: nullableTextColumn("prefix"),
+  }),
+  graphql_operation: scopedExecutorTable("graphql_operation", {
+    source_id: textColumn("source_id"),
+    binding: jsonColumn("binding"),
+  }),
+} satisfies FumaTables;
 
 export type GraphqlSchema = typeof graphqlSchema;
 
@@ -95,8 +70,7 @@ export type GraphqlSchema = typeof graphqlSchema;
 export interface StoredGraphqlSource {
   readonly namespace: string;
   /** Executor scope id this source row lives in. Writes stamp this on
-   *  `scope_id`; reads return whichever scope's row the adapter's
-   *  fall-through walk surfaced first. */
+   *  `scope_id`; reads choose scope explicitly in the FumaDB query. */
   readonly scope: string;
   readonly name: string;
   readonly endpoint: string;
@@ -184,16 +158,25 @@ const rowsToValueMap = (
   return out;
 };
 
+interface GraphqlChildValueInsert {
+  id: string;
+  scope_id: string;
+  source_id: string;
+  name: string;
+  kind: "text" | "binding";
+  text_value?: string;
+  slot_key?: string;
+  prefix?: string;
+}
+
 // Encode one entry of a source credential map into a child row. Used by the
 // writer for both `graphql_source_header` and `graphql_source_query_param`.
-// Returns a `Record<string, unknown>` so the result is structurally assignable
-// to the typed adapter's `RowInput` shape.
 const valueToChildRow = (
   sourceId: string,
   scope: string,
   name: string,
   value: ConfiguredGraphqlCredentialValue,
-): Record<string, unknown> => {
+): GraphqlChildValueInsert => {
   const id = JSON.stringify([sourceId, name]);
   if (typeof value === "string") {
     return {
@@ -228,16 +211,8 @@ const rowToAuth = (row: typeof SourceRow.Type): GraphqlSourceAuth => {
 // ---------------------------------------------------------------------------
 
 // Every read/write that targets a single row pins BOTH the natural id
-// (namespace, toolId) AND the owning `scope_id`. The store runs behind
-// the scoped adapter (which auto-injects `scope_id IN (stack)`), so a
-// bare `{id}` filter resolves to any matching row in the stack in
-// adapter-iteration order. For shadowed rows (same id at multiple
-// scopes — e.g. an org-level GraphQL source with a per-user override),
-// that's a scope-isolation bug: updates and deletes can land on the
-// wrong scope's row. Callers thread the resolved scope in (typically
-// `path.scopeId` for HTTP, `toolRow.scope_id` / `input.scope` for
-// invokeTool/lifecycle) so every keyed mutation targets exactly one
-// row.
+// (namespace, toolId) AND the owning `scope_id`. Scope is a normal FumaDB
+// predicate here, not hidden behavior.
 export interface GraphqlStore {
   readonly upsertSource: (
     input: StoredGraphqlSource,
@@ -281,28 +256,27 @@ export interface GraphqlStore {
 // ---------------------------------------------------------------------------
 
 export const makeDefaultGraphqlStore = ({
-  adapter: db,
+  fuma,
+  scopes,
 }: StorageDeps<GraphqlSchema>): GraphqlStore => {
+  const scopeIds = scopes.map((scope) => String(scope.id));
+
   const loadHeaders = (sourceId: string, scope: string) =>
-    db
-      .findMany({
-        model: "graphql_source_header",
-        where: [
-          { field: "source_id", value: sourceId },
-          { field: "scope_id", value: scope },
-        ],
-      })
+    fuma
+      .use("graphql_source_header.findManyBySourceScope", (db) =>
+        db.findMany("graphql_source_header", {
+          where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+        }),
+      )
       .pipe(Effect.map(rowsToValueMap));
 
   const loadQueryParams = (sourceId: string, scope: string) =>
-    db
-      .findMany({
-        model: "graphql_source_query_param",
-        where: [
-          { field: "source_id", value: sourceId },
-          { field: "scope_id", value: scope },
-        ],
-      })
+    fuma
+      .use("graphql_source_query_param.findManyBySourceScope", (db) =>
+        db.findMany("graphql_source_query_param", {
+          where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+        }),
+      )
       .pipe(Effect.map(rowsToValueMap));
 
   const rowToSourceWithChildren = (
@@ -338,77 +312,67 @@ export const makeDefaultGraphqlStore = ({
   // by both upsertSource (full rewrite) and updateSourceMeta (partial
   // patch when headers/queryParams is supplied).
   const replaceChildren = (
-    model: "graphql_source_header" | "graphql_source_query_param",
+    tableName: "graphql_source_header" | "graphql_source_query_param",
     sourceId: string,
     scope: string,
     values: Record<string, ConfiguredGraphqlCredentialValue>,
   ) =>
     Effect.gen(function* () {
-      yield* db.deleteMany({
-        model,
-        where: [
-          { field: "source_id", value: sourceId },
-          { field: "scope_id", value: scope },
-        ],
-      });
+      yield* fuma.use(`${tableName}.deleteManyBySourceScope`, (db) =>
+        db.deleteMany(tableName, {
+          where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+        }),
+      );
       const entries = Object.entries(values);
       if (entries.length === 0) return;
-      yield* db.createMany({
-        model,
-        data: entries.map(([name, value]) => valueToChildRow(sourceId, scope, name, value)),
-        forceAllowId: true,
-      });
+      yield* fuma
+        .use(`${tableName}.createMany`, (db) =>
+          db.createMany(
+            tableName,
+            entries.map(([name, value]) => valueToChildRow(sourceId, scope, name, value)),
+          ),
+        )
+        .pipe(Effect.asVoid);
     });
 
   const deleteSource = (namespace: string, scope: string) =>
     Effect.gen(function* () {
-      yield* db.deleteMany({
-        model: "graphql_operation",
-        where: [
-          { field: "source_id", value: namespace },
-          { field: "scope_id", value: scope },
-        ],
-      });
-      yield* db.deleteMany({
-        model: "graphql_source_header",
-        where: [
-          { field: "source_id", value: namespace },
-          { field: "scope_id", value: scope },
-        ],
-      });
-      yield* db.deleteMany({
-        model: "graphql_source_query_param",
-        where: [
-          { field: "source_id", value: namespace },
-          { field: "scope_id", value: scope },
-        ],
-      });
-      yield* db.delete({
-        model: "graphql_source",
-        where: [
-          { field: "id", value: namespace },
-          { field: "scope_id", value: scope },
-        ],
-      });
+      yield* fuma.use("graphql_operation.deleteManyBySourceScope", (db) =>
+        db.deleteMany("graphql_operation", {
+          where: (b) => b.and(b("source_id", "=", namespace), b("scope_id", "=", scope)),
+        }),
+      );
+      yield* fuma.use("graphql_source_header.deleteManyBySourceScope", (db) =>
+        db.deleteMany("graphql_source_header", {
+          where: (b) => b.and(b("source_id", "=", namespace), b("scope_id", "=", scope)),
+        }),
+      );
+      yield* fuma.use("graphql_source_query_param.deleteManyBySourceScope", (db) =>
+        db.deleteMany("graphql_source_query_param", {
+          where: (b) => b.and(b("source_id", "=", namespace), b("scope_id", "=", scope)),
+        }),
+      );
+      yield* fuma.use("graphql_source.deleteManyByScopedId", (db) =>
+        db.deleteMany("graphql_source", {
+          where: (b) => b.and(b("id", "=", namespace), b("scope_id", "=", scope)),
+        }),
+      );
     });
 
   return {
     upsertSource: (input, operations) =>
       Effect.gen(function* () {
         yield* deleteSource(input.namespace, input.scope);
-        yield* db.create({
-          model: "graphql_source",
-          data: {
+        yield* fuma.use("graphql_source.create", (db) =>
+          db.create("graphql_source", {
             id: input.namespace,
             scope_id: input.scope,
             name: input.name,
             endpoint: input.endpoint,
             auth_kind: input.auth.kind,
-            auth_connection_slot:
-              input.auth.kind === "oauth2" ? input.auth.connectionSlot : undefined,
-          },
-          forceAllowId: true,
-        });
+            auth_connection_slot: input.auth.kind === "oauth2" ? input.auth.connectionSlot : null,
+          }),
+        );
         yield* replaceChildren(
           "graphql_source_header",
           input.namespace,
@@ -422,30 +386,36 @@ export const makeDefaultGraphqlStore = ({
           input.queryParams,
         );
         if (operations.length > 0) {
-          yield* db.createMany({
-            model: "graphql_operation",
-            data: operations.map((op) => ({
-              id: op.toolId,
-              scope_id: input.scope,
-              source_id: op.sourceId,
-              binding: toJsonRecord(encodeBinding(op.binding)),
-            })),
-            forceAllowId: true,
-          });
+          yield* fuma
+            .use("graphql_operation.createMany", (db) =>
+              db.createMany(
+                "graphql_operation",
+                operations.map((op) => ({
+                  id: op.toolId,
+                  scope_id: input.scope,
+                  source_id: op.sourceId,
+                  binding: toJsonRecord(encodeBinding(op.binding)),
+                })),
+              ),
+            )
+            .pipe(Effect.asVoid);
         }
       }),
 
     updateSourceMeta: (namespace, scope, patch) =>
       Effect.gen(function* () {
-        const existing = yield* db.findOne({
-          model: "graphql_source",
-          where: [
-            { field: "id", value: namespace },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const existing = yield* fuma.use("graphql_source.findFirstByScopedId", (db) =>
+          db.findFirst("graphql_source", {
+            where: (b) => b.and(b("id", "=", namespace), b("scope_id", "=", scope)),
+          }),
+        );
         if (!existing) return;
-        const update: Record<string, unknown> = {};
+        const update: Partial<{
+          name: string;
+          endpoint: string;
+          auth_kind: string;
+          auth_connection_slot: string | null;
+        }> = {};
         if (patch.name !== undefined) update.name = patch.name;
         if (patch.endpoint !== undefined) update.endpoint = patch.endpoint;
         if (patch.auth !== undefined) {
@@ -454,14 +424,12 @@ export const makeDefaultGraphqlStore = ({
             patch.auth.kind === "oauth2" ? patch.auth.connectionSlot : null;
         }
         if (Object.keys(update).length > 0) {
-          yield* db.update({
-            model: "graphql_source",
-            where: [
-              { field: "id", value: namespace },
-              { field: "scope_id", value: scope },
-            ],
-            update,
-          });
+          yield* fuma.use("graphql_source.updateManyByScopedId", (db) =>
+            db.updateMany("graphql_source", {
+              where: (b) => b.and(b("id", "=", namespace), b("scope_id", "=", scope)),
+              set: update,
+            }),
+          );
         }
         if (patch.headers !== undefined) {
           yield* replaceChildren("graphql_source_header", namespace, scope, patch.headers);
@@ -473,45 +441,46 @@ export const makeDefaultGraphqlStore = ({
 
     getSource: (namespace, scope) =>
       Effect.gen(function* () {
-        const row = yield* db.findOne({
-          model: "graphql_source",
-          where: [
-            { field: "id", value: namespace },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const row = yield* fuma.use("graphql_source.findFirstByScopedId", (db) =>
+          db.findFirst("graphql_source", {
+            where: (b) => b.and(b("id", "=", namespace), b("scope_id", "=", scope)),
+          }),
+        );
         if (!row) return null;
         return yield* rowToSourceWithChildren(row);
       }),
 
     listSources: () =>
       Effect.gen(function* () {
-        const rows = yield* db.findMany({ model: "graphql_source" });
+        const rows = yield* fuma.use("graphql_source.findMany", (db) =>
+          db.findMany("graphql_source", {
+            where: (b) =>
+              scopeIds.length === 1
+                ? b("scope_id", "=", scopeIds[0]!)
+                : b("scope_id", "in", [...scopeIds]),
+          }),
+        );
         return yield* Effect.forEach(rows, rowToSourceWithChildren, {
           concurrency: "unbounded",
         });
       }),
 
     getOperationByToolId: (toolId, scope) =>
-      db
-        .findOne({
-          model: "graphql_operation",
-          where: [
-            { field: "id", value: toolId },
-            { field: "scope_id", value: scope },
-          ],
-        })
+      fuma
+        .use("graphql_operation.findFirstByScopedId", (db) =>
+          db.findFirst("graphql_operation", {
+            where: (b) => b.and(b("id", "=", toolId), b("scope_id", "=", scope)),
+          }),
+        )
         .pipe(Effect.map((row) => (row ? rowToOperation(row) : null))),
 
     listOperationsBySource: (sourceId, scope) =>
-      db
-        .findMany({
-          model: "graphql_operation",
-          where: [
-            { field: "source_id", value: sourceId },
-            { field: "scope_id", value: scope },
-          ],
-        })
+      fuma
+        .use("graphql_operation.findManyBySourceScope", (db) =>
+          db.findMany("graphql_operation", {
+            where: (b) => b.and(b("source_id", "=", sourceId), b("scope_id", "=", scope)),
+          }),
+        )
         .pipe(Effect.map((rows) => rows.map(rowToOperation))),
 
     removeSource: (namespace, scope) => deleteSource(namespace, scope),

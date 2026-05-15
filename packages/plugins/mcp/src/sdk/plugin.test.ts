@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Result } from "effect";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import z from "zod";
 
 import {
   ConnectionId,
@@ -13,9 +13,9 @@ import {
   OAUTH2_PROVIDER_KEY,
   createExecutor,
   definePlugin,
-  makeTestConfig,
   type SecretProvider,
 } from "@executor-js/sdk";
+import { makeTestConfig } from "@executor-js/sdk/testing";
 
 import { mcpPlugin, userFacingProbeMessage } from "./plugin";
 import { MCP_OAUTH_CONNECTION_SLOT } from "./types";
@@ -259,8 +259,8 @@ describe("mcpPlugin", () => {
 
   // -------------------------------------------------------------------------
   // Multi-scope shadowing — regression suite covering the bug class where
-  // store reads/writes that don't pin scope_id collapse onto whichever row
-  // the scoped adapter's `scope_id IN (stack)` filter sees first. Each
+  // store reads/writes that don't pin scope_id collapse onto whichever visible
+  // row wins first. Each
   // scenario is reproducible against the pre-fix store.
   //
   // MCP discovery runs on addSource against an unreachable endpoint so

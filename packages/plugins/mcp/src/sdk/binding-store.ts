@@ -20,9 +20,14 @@ import { Effect, Option, Schema } from "effect";
 
 import {
   ConfiguredCredentialBinding,
-  defineSchema,
+  dateColumn,
+  type FumaTables,
+  jsonColumn,
+  nullableTextColumn,
+  scopedExecutorTable,
   type StorageDeps,
   type StorageFailure,
+  textColumn,
 } from "@executor-js/sdk/core";
 
 import {
@@ -36,81 +41,53 @@ import {
 // Schema
 // ---------------------------------------------------------------------------
 
-export const mcpSchema = defineSchema({
-  mcp_source: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      name: { type: "string", required: true },
-      // Plugin-private structural data minus the ref-bearing fields
-      // (auth, headers, queryParams). For remote sources: transport,
-      // endpoint, remoteTransport. For stdio: transport, command,
-      // args, env, cwd.
-      config: { type: "json", required: true },
-      // Flattened McpConnectionAuth. The stored source only names slots;
-      // concrete per-user/per-workspace values live in core credential_binding.
-      auth_kind: {
-        type: ["none", "header", "oauth2"],
-        required: true,
-        defaultValue: "none",
-      },
-      // Header-auth fields.
-      auth_header_name: { type: "string", required: false },
-      auth_header_slot: { type: "string", required: false },
-      auth_header_prefix: { type: "string", required: false },
-      // OAuth2 auth fields.
-      auth_connection_slot: { type: "string", required: false },
-      auth_client_id_slot: {
-        type: "string",
-        required: false,
-      },
-      auth_client_secret_slot: {
-        type: "string",
-        required: false,
-      },
-      created_at: { type: "date", required: true },
-    },
-  },
-  mcp_source_header: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      source_id: { type: "string", required: true, index: true },
-      name: { type: "string", required: true },
-      kind: { type: ["text", "binding"], required: true },
-      text_value: { type: "string", required: false },
-      slot_key: { type: "string", required: false },
-      prefix: { type: "string", required: false },
-    },
-  },
-  mcp_source_query_param: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      source_id: { type: "string", required: true, index: true },
-      name: { type: "string", required: true },
-      kind: { type: ["text", "binding"], required: true },
-      text_value: { type: "string", required: false },
-      slot_key: { type: "string", required: false },
-      prefix: { type: "string", required: false },
-    },
-  },
-  mcp_binding: {
-    fields: {
-      id: { type: "string", required: true },
-      scope_id: { type: "string", required: true, index: true },
-      source_id: { type: "string", required: true, index: true },
-      binding: { type: "json", required: true },
-      created_at: { type: "date", required: true },
-    },
-  },
-});
+export const mcpSchema = {
+  mcp_source: scopedExecutorTable("mcp_source", {
+    name: textColumn("name"),
+    // Plugin-private structural data minus the ref-bearing fields
+    // (auth, headers, queryParams). For remote sources: transport,
+    // endpoint, remoteTransport. For stdio: transport, command,
+    // args, env, cwd.
+    config: jsonColumn("config"),
+    // Flattened McpConnectionAuth. The stored source only names slots;
+    // concrete per-user/per-workspace values live in core credential_binding.
+    auth_kind: textColumn("auth_kind").defaultTo("none"),
+    auth_header_name: nullableTextColumn("auth_header_name"),
+    auth_header_slot: nullableTextColumn("auth_header_slot"),
+    auth_header_prefix: nullableTextColumn("auth_header_prefix"),
+    auth_connection_slot: nullableTextColumn("auth_connection_slot"),
+    auth_client_id_slot: nullableTextColumn("auth_client_id_slot"),
+    auth_client_secret_slot: nullableTextColumn("auth_client_secret_slot"),
+    created_at: dateColumn("created_at"),
+  }),
+  mcp_source_header: scopedExecutorTable("mcp_source_header", {
+    source_id: textColumn("source_id"),
+    name: textColumn("name"),
+    kind: textColumn("kind"),
+    text_value: nullableTextColumn("text_value"),
+    slot_key: nullableTextColumn("slot_key"),
+    prefix: nullableTextColumn("prefix"),
+  }),
+  mcp_source_query_param: scopedExecutorTable("mcp_source_query_param", {
+    source_id: textColumn("source_id"),
+    name: textColumn("name"),
+    kind: textColumn("kind"),
+    text_value: nullableTextColumn("text_value"),
+    slot_key: nullableTextColumn("slot_key"),
+    prefix: nullableTextColumn("prefix"),
+  }),
+  mcp_binding: scopedExecutorTable("mcp_binding", {
+    source_id: textColumn("source_id"),
+    binding: jsonColumn("binding"),
+    created_at: dateColumn("created_at"),
+  }),
+} satisfies FumaTables;
 
 export type McpSchema = typeof mcpSchema;
 
 // ---------------------------------------------------------------------------
-// Serialization helpers — JSON columns round-trip through the adapter as
-// either plain objects or serialized strings depending on the backend.
+// Serialization helpers — JSON columns round-trip as either plain objects
+// or serialized strings depending on the backend.
 // ---------------------------------------------------------------------------
 
 const decodeSourceData = Schema.decodeUnknownSync(McpStoredSourceData);
@@ -251,8 +228,7 @@ const rowsToValueMap = (
 export interface McpStoredSource {
   readonly namespace: string;
   /** Executor scope id this source row lives in. Writes stamp this on
-   *  `scope_id`; reads return whichever scope's row the adapter's
-   *  fall-through walk surfaced first. */
+   *  `scope_id`; reads choose scope explicitly in the FumaDB query. */
   readonly scope: string;
   readonly name: string;
   readonly config: McpStoredSourceData;
@@ -262,22 +238,9 @@ export interface McpStoredSource {
 // Store interface
 // ---------------------------------------------------------------------------
 
-// Every method routes through the typed adapter (`ctx.storage.adapter`)
-// so the typed error channel is `StorageFailure`. Schema-decode failures
-// inside `Effect.gen` land as defects, not typed errors, and are caught
-// by the HTTP edge's observability middleware.
-//
 // Every read/write that targets a single row pins BOTH the natural id
-// (namespace, toolId, sessionId) AND the owning `scope_id`. The store
-// runs behind the scoped adapter (which auto-injects `scope_id IN
-// (stack)`), so a bare `{id}` filter resolves to any matching row in
-// the stack in adapter-iteration order. For shadowed rows (same id at
-// multiple scopes — e.g. an org-level MCP source with a per-user
-// override), that's a scope-isolation bug: updates and deletes can
-// land on the wrong scope's row. Callers thread the resolved scope in
-// (typically `path.scopeId` for HTTP, `toolRow.scope_id` /
-// `input.scope` for invokeTool/lifecycle) so every keyed mutation
-// targets exactly one row.
+// (namespace, toolId, sessionId) AND the owning `scope_id`. Scope is a
+// normal FumaDB predicate here, not hidden behavior.
 export interface McpBindingStore {
   readonly listBindingsBySource: (
     namespace: string,
@@ -328,92 +291,85 @@ export interface McpBindingStore {
 // Factory
 // ---------------------------------------------------------------------------
 
-export const makeMcpStore = ({ adapter: db }: StorageDeps<McpSchema>): McpBindingStore => {
+export const makeMcpStore = ({ fuma }: StorageDeps<McpSchema>): McpBindingStore => {
   return {
     listBindingsBySource: (namespace, scope) =>
       Effect.gen(function* () {
-        const rows = yield* db.findMany({
-          model: "mcp_binding",
-          where: [
-            { field: "source_id", value: namespace },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const rows = yield* fuma.use("mcp_binding.findManyBySourceScope", (db) =>
+          db.findMany("mcp_binding", {
+            where: (b) => b.and(b("source_id", "=", namespace), b("scope_id", "=", scope)),
+          }),
+        );
         return rows.map((row) => ({
-          toolId: row.id,
+          toolId: String(row.id),
           binding: decodeBinding(coerceJson(row.binding)),
         }));
       }),
 
     getBinding: (toolId, scope) =>
       Effect.gen(function* () {
-        const row = yield* db.findOne({
-          model: "mcp_binding",
-          where: [
-            { field: "id", value: toolId },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const row = yield* fuma.use("mcp_binding.findFirstByScopedId", (db) =>
+          db.findFirst("mcp_binding", {
+            where: (b) => b.and(b("id", "=", toolId), b("scope_id", "=", scope)),
+          }),
+        );
         if (!row) return null;
         const binding = decodeBinding(coerceJson(row.binding));
-        return { binding, namespace: row.source_id };
+        return { binding, namespace: String(row.source_id) };
       }),
 
     putBindings: (namespace, scope, entries) =>
       Effect.gen(function* () {
         if (entries.length === 0) return;
         const now = new Date();
-        yield* db.createMany({
-          model: "mcp_binding",
-          data: entries.map((e) => ({
-            id: e.toolId,
-            scope_id: scope,
-            source_id: namespace,
-            binding: encodeBinding(e.binding),
-            created_at: now,
-          })),
-          forceAllowId: true,
-        });
+        yield* fuma
+          .use("mcp_binding.createMany", (db) =>
+            db.createMany(
+              "mcp_binding",
+              entries.map((e) => ({
+                id: e.toolId,
+                scope_id: scope,
+                source_id: namespace,
+                binding: encodeBinding(e.binding),
+                created_at: now,
+              })),
+            ),
+          )
+          .pipe(Effect.asVoid);
       }),
 
     removeBindingsByNamespace: (namespace, scope) =>
-      db
-        .deleteMany({
-          model: "mcp_binding",
-          where: [
-            { field: "source_id", value: namespace },
-            { field: "scope_id", value: scope },
-          ],
-        })
+      fuma
+        .use("mcp_binding.deleteManyBySourceScope", (db) =>
+          db.deleteMany("mcp_binding", {
+            where: (b) => b.and(b("source_id", "=", namespace), b("scope_id", "=", scope)),
+          }),
+        )
         .pipe(Effect.asVoid),
 
     getSource: (namespace, scope) =>
       Effect.gen(function* () {
-        const row = yield* db.findOne({
-          model: "mcp_source",
-          where: [
-            { field: "id", value: namespace },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const row = yield* fuma.use("mcp_source.findFirstByScopedId", (db) =>
+          db.findFirst("mcp_source", {
+            where: (b) => b.and(b("id", "=", namespace), b("scope_id", "=", scope)),
+          }),
+        );
         if (!row) return null;
         return {
-          namespace: row.id,
-          scope: row.scope_id,
-          name: row.name,
+          namespace: String(row.id),
+          scope: String(row.scope_id),
+          name: String(row.name),
           config: yield* hydrateSourceData(row, namespace, scope),
         };
       }),
 
     getSourceConfig: (namespace, scope) =>
       Effect.gen(function* () {
-        const row = yield* db.findOne({
-          model: "mcp_source",
-          where: [
-            { field: "id", value: namespace },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        const row = yield* fuma.use("mcp_source.findFirstByScopedId", (db) =>
+          db.findFirst("mcp_source", {
+            where: (b) => b.and(b("id", "=", namespace), b("scope_id", "=", scope)),
+          }),
+        );
         if (!row) return null;
         return yield* hydrateSourceData(row, namespace, scope);
       }),
@@ -423,13 +379,11 @@ export const makeMcpStore = ({ adapter: db }: StorageDeps<McpSchema>): McpBindin
         const now = new Date();
         // Drop the source row and its child rows; recreate. Two-step
         // matches the existing put-overwrites-existing semantic.
-        yield* db.delete({
-          model: "mcp_source",
-          where: [
-            { field: "id", value: source.namespace },
-            { field: "scope_id", value: source.scope },
-          ],
-        });
+        yield* fuma.use("mcp_source.deleteManyByScopedId", (db) =>
+          db.deleteMany("mcp_source", {
+            where: (b) => b.and(b("id", "=", source.namespace), b("scope_id", "=", source.scope)),
+          }),
+        );
         yield* deleteSourceChildren(source.namespace, source.scope);
 
         const auth: McpConnectionAuth =
@@ -447,71 +401,63 @@ export const makeMcpStore = ({ adapter: db }: StorageDeps<McpSchema>): McpBindin
           encodeSourceData(source.config) as Record<string, unknown>,
         );
 
-        yield* db.create({
-          model: "mcp_source",
-          data: {
+        yield* fuma.use("mcp_source.create", (db) =>
+          db.create("mcp_source", {
             id: source.namespace,
             scope_id: source.scope,
             name: source.name,
             config: encodedConfig,
             created_at: now,
             ...authCols,
-          },
-          forceAllowId: true,
-        });
+          }),
+        );
 
         const headerRows = valueMapToRows(source.namespace, source.scope, headers);
         if (headerRows.length > 0) {
-          yield* db.createMany({
-            model: "mcp_source_header",
-            data: headerRows,
-            forceAllowId: true,
-          });
+          yield* fuma
+            .use("mcp_source_header.createMany", (db) =>
+              db.createMany("mcp_source_header", [...headerRows]),
+            )
+            .pipe(Effect.asVoid);
         }
         const paramRows = valueMapToRows(source.namespace, source.scope, queryParams);
         if (paramRows.length > 0) {
-          yield* db.createMany({
-            model: "mcp_source_query_param",
-            data: paramRows,
-            forceAllowId: true,
-          });
+          yield* fuma
+            .use("mcp_source_query_param.createMany", (db) =>
+              db.createMany("mcp_source_query_param", [...paramRows]),
+            )
+            .pipe(Effect.asVoid);
         }
       }),
 
     removeSource: (namespace, scope) =>
       Effect.gen(function* () {
-        yield* db.deleteMany({
-          model: "mcp_binding",
-          where: [
-            { field: "source_id", value: namespace },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        yield* fuma.use("mcp_binding.deleteManyBySourceScope", (db) =>
+          db.deleteMany("mcp_binding", {
+            where: (b) => b.and(b("source_id", "=", namespace), b("scope_id", "=", scope)),
+          }),
+        );
         yield* deleteSourceChildren(namespace, scope);
-        yield* db.delete({
-          model: "mcp_source",
-          where: [
-            { field: "id", value: namespace },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        yield* fuma.use("mcp_source.deleteManyByScopedId", (db) =>
+          db.deleteMany("mcp_source", {
+            where: (b) => b.and(b("id", "=", namespace), b("scope_id", "=", scope)),
+          }),
+        );
       }),
   };
 
   // ---------------------------------------------------------------------
-  // Private helpers — depend on `db` so they live inside the closure.
+  // Private helpers — depend on `fuma` so they live inside the closure.
   // ---------------------------------------------------------------------
 
   function deleteSourceChildren(namespace: string, scope: string) {
     return Effect.gen(function* () {
       for (const model of ["mcp_source_header", "mcp_source_query_param"] as const) {
-        yield* db.deleteMany({
-          model,
-          where: [
-            { field: "source_id", value: namespace },
-            { field: "scope_id", value: scope },
-          ],
-        });
+        yield* fuma.use(`${model}.deleteManyBySourceScope`, (db) =>
+          db.deleteMany(model, {
+            where: (b) => b.and(b("source_id", "=", namespace), b("scope_id", "=", scope)),
+          }),
+        );
       }
     });
   }
@@ -531,20 +477,16 @@ export const makeMcpStore = ({ adapter: db }: StorageDeps<McpSchema>): McpBindin
         // stdio sources have no extracted fields — decode as-is.
         return decodeSourceData(partial);
       }
-      const headerRows = yield* db.findMany({
-        model: "mcp_source_header",
-        where: [
-          { field: "source_id", value: namespace },
-          { field: "scope_id", value: scope },
-        ],
-      });
-      const paramRows = yield* db.findMany({
-        model: "mcp_source_query_param",
-        where: [
-          { field: "source_id", value: namespace },
-          { field: "scope_id", value: scope },
-        ],
-      });
+      const headerRows = yield* fuma.use("mcp_source_header.findManyBySourceScope", (db) =>
+        db.findMany("mcp_source_header", {
+          where: (b) => b.and(b("source_id", "=", namespace), b("scope_id", "=", scope)),
+        }),
+      );
+      const paramRows = yield* fuma.use("mcp_source_query_param.findManyBySourceScope", (db) =>
+        db.findMany("mcp_source_query_param", {
+          where: (b) => b.and(b("source_id", "=", namespace), b("scope_id", "=", scope)),
+        }),
+      );
       const headers = rowsToValueMap(headerRows);
       const queryParams = rowsToValueMap(paramRows);
       const reassembled = {

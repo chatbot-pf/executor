@@ -6,6 +6,8 @@ export {
   createExecutor,
   type Executor,
   type ExecutorConfig,
+  type PromiseInvokeOptions,
+  type PromiseOnElicitation,
   type Promisified,
 } from "./promise-executor";
 
@@ -32,7 +34,10 @@ export {
 } from "./types";
 export type { ToolAnnotations } from "./core-schema";
 export type { AnyPlugin, PluginExtensions } from "./plugin";
-export type { OnElicitation, InvokeOptions } from "./executor";
+export type {
+  PromiseOnElicitation as OnElicitation,
+  PromiseInvokeOptions as InvokeOptions,
+} from "./promise-executor";
 
 // Elicitation — Promise invoke returns raw values, but consumers still
 // may want to reference request/response shapes.
@@ -59,7 +64,7 @@ export {
 
 // File-config helper for the CLI. Plain typed-object factory with no
 // Effect in its signature, so it's safe to live on the Promise surface.
-export { defineExecutorConfig, type ExecutorCliConfig, type ExecutorDialect } from "./config";
+export { defineExecutorConfig, type ExecutorCliConfig } from "./config";
 
 // Error tags — Promise callers handle these via .catch().
 export {

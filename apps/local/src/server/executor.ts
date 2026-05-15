@@ -1,12 +1,25 @@
+import { Context, Data, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
-import { Context, Data, Effect, Layer, ManagedRuntime, Schema } from "effect";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import {
+  Scope,
+  ScopeId,
+  collectTables,
+  createExecutor,
+  type AnyPlugin,
+  type Executor,
+  type FumaTables,
+} from "@executor-js/sdk";
+import { withQueryContext } from "fumadb/query";
+import { loadPluginsFromJsonc } from "@executor-js/config";
+
+import executorConfig from "../../executor.config";
 import embeddedMigrations from "./embedded-migrations.gen";
 import {
   importLegacySecrets,
@@ -14,22 +27,30 @@ import {
   readLegacySecrets,
   type LegacySecret,
 } from "./db-upgrade";
+import * as legacyExecutorSchema from "./executor-schema";
+import {
+  importSqliteDataToFuma,
+  readLegacySqliteScopeIds,
+  type LocalSqliteImportResult,
+} from "./sqlite-import";
+import { createSqliteFumaDb } from "./sqlite-fumadb";
 
-import { Scope, ScopeId, type AnyPlugin, collectSchemas, createExecutor } from "@executor-js/sdk";
-import { makeSqliteAdapter, makeSqliteBlobStore } from "@executor-js/storage-file";
-import { loadPluginsFromJsonc } from "@executor-js/config";
-import * as executorSchema from "./executor-schema";
+interface ResolvedStorage {
+  readonly dataDir: string;
+  readonly sqlitePath: string;
+  readonly importMarkerPath: string;
+}
 
-import executorConfig from "../../executor.config";
+const localNamespace = "executor_local";
 
 // In dev mode the drizzle folder sits next to the source tree. In a compiled
-// binary the files are inlined via the build-time gen module below, and we
-// extract them to a tmpdir at boot so drizzle's `migrate()` — which only
-// accepts a folder path — can read them.
+// binary the files are inlined by apps/cli/src/build.ts and extracted to a
+// temp folder because drizzle's migrator accepts a folder path.
 const resolveMigrationsFolder = (): string => {
   if (!embeddedMigrations) {
     return join(import.meta.dirname, "../../drizzle");
   }
+
   const dir = fs.mkdtempSync(join(tmpdir(), "executor-migrations-"));
   for (const [rel, content] of Object.entries(embeddedMigrations)) {
     const target = join(dir, rel);
@@ -41,52 +62,62 @@ const resolveMigrationsFolder = (): string => {
 
 const MIGRATIONS_FOLDER = resolveMigrationsFolder();
 
-interface ResolvedDb {
-  readonly path: string;
-  readonly dataDir: string;
-  readonly legacySecrets: readonly LegacySecret[];
-}
-
-const resolveDbPath = (): ResolvedDb => {
+const resolveStorage = (): ResolvedStorage => {
   const dataDir = process.env.EXECUTOR_DATA_DIR ?? join(homedir(), ".executor");
   fs.mkdirSync(dataDir, { recursive: true });
-  const dbPath = `${dataDir}/data.db`;
-  // DBs written by pre-scope-refactor versions of the CLI have a schema
-  // the current drizzle migration can't be applied on top of. Before we
-  // move it aside, pull the `secret` routing rows so non-enumerating
-  // providers (keychain) stay reachable after the fresh DB is created.
-  const legacySecrets = readLegacySecrets(dbPath);
-  const backup = moveAsidePreScopeDb(dbPath);
-  if (backup) {
-    console.warn(
-      `[executor] Pre-scope database detected; moved to ${backup}. ` +
-        `Sources and tool catalogs will need to be re-added` +
-        (legacySecrets.length > 0
-          ? ` (${legacySecrets.length} secret routing row(s) preserved).`
-          : "."),
-    );
-  }
-  return { path: dbPath, dataDir, legacySecrets };
+  return {
+    dataDir,
+    sqlitePath: join(dataDir, "data.db"),
+    importMarkerPath: join(dataDir, "fumadb-sqlite-imported"),
+  };
 };
 
 // Hash suffix disambiguates same-basename folders so two projects with
-// identical directory names can't collide on the same scope id.
+// identical directory names cannot collide on the same scope id.
 const makeScopeId = (cwd: string): string => {
   const folder = basename(cwd) || cwd;
   const hash = createHash("sha256").update(cwd).digest("hex").slice(0, 8);
   return `${folder}-${hash}`;
 };
 
+const resolvePluginConfigPath = (scopeDir: string): string => join(scopeDir, "executor.jsonc");
+
 // Plugins reach the host through two doors that compose:
-//   - `executor.config.ts`'s static tuple (typed at TS compile time)
-//   - `executor.jsonc#plugins` (loaded via jiti at boot)
-// We concatenate the two and widen the result to `readonly AnyPlugin[]`.
-// The frontend's typed atom client still resolves correctly because
-// each plugin imports its own group from `${pkg}/shared`.
+//   - `executor.config.ts`'s static tuple
+//   - `executor.jsonc#plugins` loaded at boot
+// Static config wins on conflict, matching the Vite plugin.
 type LocalPlugins = readonly AnyPlugin[];
 
+const loadLocalPlugins = Effect.gen(function* () {
+  const cwd = process.env.EXECUTOR_SCOPE_DIR || process.cwd();
+  const staticPlugins = executorConfig.plugins();
+  const dynamicPlugins =
+    (yield* Effect.promise(() => loadPluginsFromJsonc({ path: resolvePluginConfigPath(cwd) }))) ??
+    [];
+
+  const staticPackageNames = new Set(
+    staticPlugins.map((plugin) => plugin.packageName).filter((name): name is string => !!name),
+  );
+  const dedupedDynamic = dynamicPlugins.filter((plugin) => {
+    if (plugin.packageName && staticPackageNames.has(plugin.packageName)) {
+      console.warn(
+        `[executor] plugin "${plugin.packageName}" appears in both ` +
+          `executor.config.ts and executor.jsonc#plugins. The static ` +
+          `entry wins; the jsonc entry is ignored.`,
+      );
+      return false;
+    }
+    return true;
+  });
+
+  return {
+    cwd,
+    plugins: [...staticPlugins, ...dedupedDynamic] as LocalPlugins,
+  };
+});
+
 interface LocalExecutorBundle {
-  readonly executor: Effect.Success<ReturnType<typeof createExecutor<LocalPlugins>>>;
+  readonly executor: Executor<LocalPlugins>;
   readonly plugins: LocalPlugins;
 }
 
@@ -96,21 +127,9 @@ class LocalExecutorTag extends Context.Service<LocalExecutorTag, LocalExecutorBu
 
 export type LocalExecutor = LocalExecutorBundle["executor"];
 
-export class LocalDatabaseSchemaTooNew extends Data.TaggedError("LocalDatabaseSchemaTooNew")<{
-  readonly message: string;
-  readonly dbPath: string;
-  readonly appliedMigrationCount: number;
-  readonly knownMigrationCount: number;
-}> {}
-
-export class LocalDatabaseMigrationHistoryMismatch extends Data.TaggedError(
-  "LocalDatabaseMigrationHistoryMismatch",
-)<{
-  readonly message: string;
-  readonly dbPath: string;
-  readonly migrationIndex: number;
-  readonly appliedHash: string | undefined;
-  readonly knownHash: string | undefined;
+class LocalExecutorCreateError extends Data.TaggedError("LocalExecutorCreateError")<{
+  readonly operation: "createSqlite" | "importSqlite";
+  readonly cause: unknown;
 }> {}
 
 class LocalExecutorDisposeError extends Data.TaggedError("LocalExecutorDisposeError")<{
@@ -143,6 +162,12 @@ const handleOrNull = (promise: ReturnType<typeof createExecutorHandle>) =>
     ),
   );
 
+const sqliteTableHasColumn = (db: Database, table: string, column: string): boolean =>
+  db
+    .query<{ name: string }, []>(`PRAGMA table_info('${table.replaceAll("'", "''")}')`)
+    .all()
+    .some((row) => row.name === column);
+
 export const drizzleMigrationsTableExists = (sqlite: Database): boolean => {
   const row = sqlite
     .query<{ name: string }, [string]>(
@@ -156,8 +181,6 @@ export const drizzleMigrationsTableExists = (sqlite: Database): boolean => {
 export const readAppliedDrizzleMigrationHashes = (sqlite: Database): ReadonlyArray<string> => {
   if (!drizzleMigrationsTableExists(sqlite)) return [];
 
-  // Drizzle inserts one row per applied migration. `id` is the stable
-  // application order; `created_at` comes from migration metadata and can tie.
   return sqlite
     .query<{ hash: string }, []>("SELECT hash FROM __drizzle_migrations ORDER BY id ASC")
     .all()
@@ -178,8 +201,6 @@ const decodeDrizzleJournal = Schema.decodeUnknownSync(Schema.fromJsonString(Driz
 export const readBundledDrizzleMigrationHashes = (
   migrationsFolder: string,
 ): ReadonlyArray<string> => {
-  // Keep this in sync with drizzle-orm/src/migrator.ts: Drizzle hashes the raw
-  // migration file contents before splitting on statement breakpoints.
   const journal = decodeDrizzleJournal(
     fs.readFileSync(join(migrationsFolder, "meta", "_journal.json")).toString(),
   );
@@ -192,113 +213,433 @@ export const readBundledDrizzleMigrationHashes = (
     });
 };
 
-const schemaTooNewMessage = (dataDir: string): string =>
-  [
-    `This Executor binary is older than the schema in ${dataDir}.`,
-    "The database was likely opened by a newer Executor build.",
-    "Use a newer Executor binary or set EXECUTOR_DATA_DIR to a different data directory.",
-  ].join("\n");
-
-const migrationHistoryMismatchMessage = (dataDir: string): string =>
-  [
-    `The migration history in ${dataDir} does not match this Executor build.`,
-    "The database may have been created by a different development branch, manually modified, or corrupted.",
-    "Use the matching Executor build, set EXECUTOR_DATA_DIR to a different data directory, or restore a backup.",
-  ].join("\n");
-
-const resolvePluginConfigPath = (scopeDir: string): string => join(scopeDir, "executor.jsonc");
-
-export const checkDrizzleMigrationCompatibility = (input: {
+const hasBundledDrizzleMigrationPrefix = (input: {
   readonly sqlite: Database;
-  readonly dbPath: string;
-  readonly dataDir: string;
   readonly migrationsFolder: string;
-}): Effect.Effect<void, LocalDatabaseSchemaTooNew | LocalDatabaseMigrationHistoryMismatch> =>
-  Effect.gen(function* () {
-    // Before running migrations, ensure the DB history is a prefix of the
-    // migrations bundled with this binary. This catches newer or divergent schemas
-    // before startup reaches arbitrary schema-dependent queries.
-    if (!drizzleMigrationsTableExists(input.sqlite)) return;
+}): boolean => {
+  if (!drizzleMigrationsTableExists(input.sqlite)) return true;
 
-    const applied = readAppliedDrizzleMigrationHashes(input.sqlite);
-    const bundled = readBundledDrizzleMigrationHashes(input.migrationsFolder);
+  const applied = readAppliedDrizzleMigrationHashes(input.sqlite);
+  const bundled = readBundledDrizzleMigrationHashes(input.migrationsFolder);
+  return (
+    applied.length <= bundled.length && applied.every((hash, index) => hash === bundled[index])
+  );
+};
 
-    if (applied.length > bundled.length) {
-      return yield* new LocalDatabaseSchemaTooNew({
-        message: schemaTooNewMessage(input.dataDir),
-        dbPath: input.dbPath,
-        appliedMigrationCount: applied.length,
-        knownMigrationCount: bundled.length,
+const isFumaSqliteDatabase = (path: string): boolean => {
+  if (!fs.existsSync(path)) return false;
+
+  let db: Database | null = null;
+  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: native SQLite probe treats unreadable legacy files as non-FumaDB databases
+  try {
+    db = new Database(path, { readonly: true });
+    const settings = db
+      .query<{ name: string }, [string]>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+      )
+      .get(`private_${localNamespace}_settings`);
+    return settings !== null || sqliteTableHasColumn(db, "source", "row_id");
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
+};
+
+const removeSqliteFileSet = (path: string) => {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    fs.rmSync(`${path}${suffix}`, { force: true });
+  }
+};
+
+const moveSqliteFileSet = (source: string, target: string) => {
+  fs.renameSync(source, target);
+  for (const suffix of ["-wal", "-shm"]) {
+    if (fs.existsSync(`${source}${suffix}`)) {
+      fs.renameSync(`${source}${suffix}`, `${target}${suffix}`);
+    }
+  }
+};
+
+const moveSqliteFileSetToBackup = (path: string): string => {
+  const backupPath = `${path}.imported-${Date.now()}-${randomBytes(4).toString("hex")}`;
+  moveSqliteFileSet(path, backupPath);
+  return backupPath;
+};
+
+const writeSqliteImportMarker = (
+  markerPath: string,
+  input: {
+    readonly importedRows: number;
+    readonly importedTables: readonly string[];
+    readonly backupPath?: string;
+    readonly recovered?: boolean;
+  },
+) => {
+  fs.mkdirSync(dirname(markerPath), { recursive: true });
+  fs.writeFileSync(
+    markerPath,
+    `${JSON.stringify({
+      importedAt: new Date().toISOString(),
+      importedRows: input.importedRows,
+      importedTables: input.importedTables,
+      backupPath: input.backupPath,
+      recovered: input.recovered === true ? true : undefined,
+    })}\n`,
+    { flag: "w" },
+  );
+};
+
+const SqliteImportMarkerSchema = Schema.Struct({
+  importedTables: Schema.optional(Schema.Array(Schema.String)),
+  importedRows: Schema.optional(Schema.Number),
+  backupPath: Schema.optional(Schema.String),
+  recovered: Schema.optional(Schema.Boolean),
+});
+
+const decodeSqliteImportMarker = Schema.decodeUnknownSync(
+  Schema.fromJsonString(SqliteImportMarkerSchema),
+);
+
+const normalizeSqliteImportMarker = (decoded: typeof SqliteImportMarkerSchema.Type) => ({
+  importedRows: decoded.importedRows ?? 0,
+  importedTables: decoded.importedTables ?? [],
+  backupPath: decoded.backupPath,
+  recovered: decoded.recovered,
+});
+
+type SqliteImportMarker = ReturnType<typeof normalizeSqliteImportMarker>;
+
+const readSqliteImportMarker = (markerPath: string): SqliteImportMarker | null => {
+  if (!fs.existsSync(markerPath)) return null;
+  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: malformed import markers are treated as incomplete so startup can re-check the database
+  try {
+    return normalizeSqliteImportMarker(
+      decodeSqliteImportMarker(fs.readFileSync(markerPath).toString()),
+    );
+  } catch {
+    return null;
+  }
+};
+
+const pickFumaTables = (tables: FumaTables, names: ReadonlySet<string>): FumaTables => {
+  const picked: FumaTables = {};
+  for (const [name, table] of Object.entries(tables)) {
+    if (names.has(name)) picked[name] = table;
+  }
+  return picked;
+};
+
+const replaceSqliteFileSetWithRollback = (input: {
+  readonly sourcePath: string;
+  readonly targetPath: string;
+}): string => {
+  const backupPath = moveSqliteFileSetToBackup(input.sourcePath);
+  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: local DB replacement must restore the original file set if the swap fails halfway
+  try {
+    moveSqliteFileSet(input.targetPath, input.sourcePath);
+    return backupPath;
+  } catch (cause) {
+    removeSqliteFileSet(input.sourcePath);
+    if (fs.existsSync(backupPath)) {
+      moveSqliteFileSet(backupPath, input.sourcePath);
+    }
+    // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: preserve the original replacement failure after rollback
+    throw cause;
+  }
+};
+
+const createLegacySecretRows = (scopeId: string, secrets: readonly LegacySecret[]) =>
+  secrets.map((secret) => ({
+    id: secret.id,
+    scope_id: scopeId,
+    name: secret.name,
+    provider: secret.provider,
+    owned_by_connection_id: null,
+    created_at: new Date(secret.createdAt),
+  }));
+
+interface PreparedLegacySqlite {
+  readonly legacySecrets: readonly LegacySecret[];
+  readonly preScopeBackup?: string;
+}
+
+const prepareLegacySqliteForFumaImport = (input: {
+  readonly storage: ResolvedStorage;
+  readonly scopeId: string;
+}): PreparedLegacySqlite => {
+  if (!fs.existsSync(input.storage.sqlitePath) || isFumaSqliteDatabase(input.storage.sqlitePath)) {
+    return { legacySecrets: [] };
+  }
+
+  const legacySecrets = readLegacySecrets(input.storage.sqlitePath);
+  const preScopeBackup = moveAsidePreScopeDb(input.storage.sqlitePath);
+  if (preScopeBackup) {
+    console.warn(
+      `[executor] Pre-scope database detected; moved to ${preScopeBackup}. ` +
+        `Sources and tool catalogs will need to be re-added` +
+        (legacySecrets.length > 0
+          ? ` (${legacySecrets.length} secret routing row(s) preserved).`
+          : "."),
+    );
+    return { legacySecrets, preScopeBackup };
+  }
+
+  const sqlite = new Database(input.storage.sqlitePath);
+  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: legacy migration preflight must close SQLite before the FumaDB import re-opens the file
+  try {
+    if (hasBundledDrizzleMigrationPrefix({ sqlite, migrationsFolder: MIGRATIONS_FOLDER })) {
+      sqlite.exec("PRAGMA journal_mode = WAL");
+      migrate(drizzle(sqlite, { schema: legacyExecutorSchema }), {
+        migrationsFolder: MIGRATIONS_FOLDER,
+      });
+      importLegacySecrets(sqlite, input.scopeId, legacySecrets);
+    } else {
+      console.warn(
+        `[executor] Local SQLite migration history in ${input.storage.dataDir} ` +
+          `does not match this build's bundled legacy migrations. ` +
+          `Skipping legacy Drizzle replay and importing the existing schema as-is.`,
+      );
+    }
+    return { legacySecrets: [] };
+  } finally {
+    sqlite.close();
+  }
+};
+
+const importMissingMarkedTables = async (input: {
+  readonly storage: ResolvedStorage;
+  readonly marker: SqliteImportMarker;
+  readonly tables: FumaTables;
+  readonly scopeId: string;
+}): Promise<LocalSqliteImportResult> => {
+  const alreadyImported = new Set(input.marker.importedTables);
+  const missingTables = Object.keys(input.tables).filter((table) => !alreadyImported.has(table));
+  if (
+    !input.marker.backupPath ||
+    missingTables.length === 0 ||
+    !fs.existsSync(input.marker.backupPath)
+  ) {
+    return { imported: false, importedRows: 0, importedTables: [] };
+  }
+
+  const missingTableSet = new Set(missingTables);
+  const target = await createSqliteFumaDb({
+    tables: input.tables,
+    namespace: localNamespace,
+    path: input.storage.sqlitePath,
+  });
+
+  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: late plugin-table imports must close the active SQLite handle on failure
+  try {
+    const pickedTables = pickFumaTables(input.tables, missingTableSet);
+    const legacyScopeIds = readLegacySqliteScopeIds({
+      sqlitePath: input.marker.backupPath,
+      tables: pickedTables,
+      scopeId: input.scopeId,
+    });
+    const result = await importSqliteDataToFuma({
+      sqlitePath: input.marker.backupPath,
+      target: withQueryContext(target.db, {
+        allowedScopeIds: legacyScopeIds,
+      }),
+      tables: pickedTables,
+      scopeId: input.scopeId,
+    });
+    target.sqlite.exec("PRAGMA wal_checkpoint(FULL)");
+    await target.close();
+
+    if (result.imported) {
+      const importedTables = [
+        ...new Set([...input.marker.importedTables, ...result.importedTables]),
+      ];
+      writeSqliteImportMarker(input.storage.importMarkerPath, {
+        importedRows: input.marker.importedRows + result.importedRows,
+        importedTables,
+        backupPath: input.marker.backupPath,
+        recovered: input.marker.recovered,
       });
     }
 
-    for (let index = 0; index < applied.length; index += 1) {
-      if (applied[index] !== bundled[index]) {
-        return yield* new LocalDatabaseMigrationHistoryMismatch({
-          message: migrationHistoryMismatchMessage(input.dataDir),
-          dbPath: input.dbPath,
-          migrationIndex: index,
-          appliedHash: applied[index],
-          knownHash: bundled[index],
+    return result;
+  } catch (cause) {
+    await target.close();
+    // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: preserve late plugin-table import failure after closing SQLite
+    throw cause;
+  }
+};
+
+export const importLegacySqliteIfNeeded = async (options: {
+  readonly storage: ResolvedStorage;
+  readonly tables: ReturnType<typeof collectTables>;
+  readonly scopeId: string;
+}) => {
+  const { storage, tables, scopeId } = options;
+  const targetPath = `${storage.sqlitePath}.fumadb-next`;
+  const marker = readSqliteImportMarker(storage.importMarkerPath);
+
+  if (marker) {
+    return importMissingMarkedTables({
+      storage,
+      marker,
+      tables,
+      scopeId,
+    });
+  }
+  if (fs.existsSync(storage.importMarkerPath)) {
+    fs.rmSync(storage.importMarkerPath, { force: true });
+  }
+
+  if (!fs.existsSync(storage.importMarkerPath) && fs.existsSync(storage.sqlitePath)) {
+    if (isFumaSqliteDatabase(storage.sqlitePath)) {
+      writeSqliteImportMarker(storage.importMarkerPath, {
+        importedRows: 0,
+        importedTables: [],
+        recovered: true,
+      });
+    } else {
+      const prepared = prepareLegacySqliteForFumaImport({ storage, scopeId });
+      if (prepared.preScopeBackup) {
+        if (prepared.legacySecrets.length > 0) {
+          const target = await createSqliteFumaDb({
+            tables,
+            namespace: localNamespace,
+            path: storage.sqlitePath,
+          });
+          // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: pre-scope secret import must close the fresh FumaDB handle on failure
+          try {
+            await withQueryContext(target.db, {
+              allowedScopeIds: new Set([scopeId]),
+            }).createMany("secret", createLegacySecretRows(scopeId, prepared.legacySecrets));
+            target.sqlite.exec("PRAGMA wal_checkpoint(FULL)");
+          } finally {
+            await target.close();
+          }
+        }
+        writeSqliteImportMarker(storage.importMarkerPath, {
+          importedRows: prepared.legacySecrets.length,
+          importedTables: prepared.legacySecrets.length > 0 ? ["secret"] : [],
+          backupPath: prepared.preScopeBackup,
         });
+        return {
+          imported: prepared.legacySecrets.length > 0,
+          importedRows: prepared.legacySecrets.length,
+          importedTables: prepared.legacySecrets.length > 0 ? ["secret"] : [],
+          backupPath: prepared.preScopeBackup,
+        };
       }
     }
+  }
+
+  if (
+    !fs.existsSync(storage.importMarkerPath) &&
+    !fs.existsSync(storage.sqlitePath) &&
+    fs.existsSync(targetPath) &&
+    isFumaSqliteDatabase(targetPath)
+  ) {
+    moveSqliteFileSet(targetPath, storage.sqlitePath);
+    writeSqliteImportMarker(storage.importMarkerPath, {
+      importedRows: 0,
+      importedTables: [],
+      recovered: true,
+    });
+  }
+
+  if (
+    !fs.existsSync(storage.sqlitePath) ||
+    fs.existsSync(storage.importMarkerPath) ||
+    isFumaSqliteDatabase(storage.sqlitePath)
+  ) {
+    return { imported: false, importedRows: 0, importedTables: [] };
+  }
+
+  removeSqliteFileSet(targetPath);
+
+  const target = await createSqliteFumaDb({
+    tables,
+    namespace: localNamespace,
+    path: targetPath,
   });
 
+  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: local SQLite cutover must close and remove the temporary target database on import failure
+  try {
+    const legacyScopeIds = readLegacySqliteScopeIds({
+      sqlitePath: storage.sqlitePath,
+      tables,
+      scopeId,
+    });
+    const result = await importSqliteDataToFuma({
+      sqlitePath: storage.sqlitePath,
+      target: withQueryContext(target.db, {
+        allowedScopeIds: legacyScopeIds,
+      }),
+      tables,
+      scopeId,
+    });
+    target.sqlite.exec("PRAGMA wal_checkpoint(FULL)");
+    await target.close();
+
+    if (result.imported) {
+      const backupPath = replaceSqliteFileSetWithRollback({
+        sourcePath: storage.sqlitePath,
+        targetPath,
+      });
+      writeSqliteImportMarker(storage.importMarkerPath, {
+        importedRows: result.importedRows,
+        importedTables: result.importedTables,
+        backupPath,
+      });
+      return { ...result, backupPath };
+    } else {
+      removeSqliteFileSet(targetPath);
+    }
+    return result;
+  } catch (cause) {
+    await target.close();
+    removeSqliteFileSet(targetPath);
+    // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: preserve the original import failure after temp-file cleanup
+    throw cause;
+  }
+};
+
 const createLocalExecutorLayer = () => {
-  const { path: dbPath, dataDir, legacySecrets } = resolveDbPath();
+  const storage = resolveStorage();
 
   return Layer.effect(LocalExecutorTag)(
     Effect.gen(function* () {
-      const sqlite = yield* Effect.acquireRelease(
-        Effect.sync(() => new Database(dbPath)),
-        (conn) => Effect.sync(() => conn.close()),
-      );
-      yield* checkDrizzleMigrationCompatibility({
-        sqlite,
-        dbPath,
-        dataDir,
-        migrationsFolder: MIGRATIONS_FOLDER,
-      });
-      sqlite.exec("PRAGMA journal_mode = WAL");
-
-      const db = drizzle(sqlite, { schema: executorSchema });
-      migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
-
-      const cwd = process.env.EXECUTOR_SCOPE_DIR || process.cwd();
+      const { cwd, plugins } = yield* loadLocalPlugins;
       const scopeId = makeScopeId(cwd);
-      // Reinstate pre-scope secret routing rows once migrations have
-      // created the new `secret` table. INSERT OR IGNORE makes this
-      // safe across reboots and on fresh installs (no-op when there's
-      // nothing to import).
-      if (legacySecrets.length > 0) {
-        importLegacySecrets(sqlite, scopeId, legacySecrets);
-      }
-      const configPath = resolvePluginConfigPath(cwd);
-      const staticPlugins = executorConfig.plugins();
-      const dynamicPlugins =
-        (yield* Effect.promise(() => loadPluginsFromJsonc({ path: configPath }))) ?? [];
-      // Static config wins on conflict — mirrors @executor-js/vite-plugin's
-      // ordering. Without this, a package listed in both surfaces would boot
-      // twice (double routes, double in-memory storage).
-      const staticPackageNames = new Set(
-        staticPlugins.map((p) => p.packageName).filter((n): n is string => !!n),
-      );
-      const dedupedDynamic = dynamicPlugins.filter((p) => {
-        if (p.packageName && staticPackageNames.has(p.packageName)) {
-          console.warn(
-            `[executor] plugin "${p.packageName}" appears in both ` +
-              `executor.config.ts and executor.jsonc#plugins. The static ` +
-              `entry wins; the jsonc entry is ignored.`,
-          );
-          return false;
-        }
-        return true;
+      const tables = collectTables(plugins);
+
+      const importResult = yield* Effect.tryPromise({
+        try: () =>
+          importLegacySqliteIfNeeded({
+            storage,
+            tables,
+            scopeId,
+          }),
+        catch: (cause) => new LocalExecutorCreateError({ operation: "importSqlite", cause }),
       });
-      const plugins: LocalPlugins = [...staticPlugins, ...dedupedDynamic];
-      const schema = collectSchemas(plugins);
-      const adapter = makeSqliteAdapter({ db, schema });
-      const blobs = makeSqliteBlobStore({ db });
+
+      const sqlite = yield* Effect.acquireRelease(
+        Effect.tryPromise({
+          try: () =>
+            createSqliteFumaDb({
+              tables,
+              namespace: localNamespace,
+              path: storage.sqlitePath,
+            }),
+          catch: (cause) => new LocalExecutorCreateError({ operation: "createSqlite", cause }),
+        }),
+        (db) => Effect.promise(() => db.close()).pipe(Effect.ignore),
+      );
+
+      if (importResult.imported) {
+        console.warn(
+          `[executor] Imported ${importResult.importedRows} row(s) into FumaDB SQLite storage` +
+            (importResult.backupPath ? `; moved old DB to ${importResult.backupPath}.` : "."),
+        );
+      }
 
       const scope = Scope.make({
         id: ScopeId.make(scopeId),
@@ -308,8 +649,7 @@ const createLocalExecutorLayer = () => {
 
       const executor = yield* createExecutor({
         scopes: [scope],
-        adapter,
-        blobs,
+        db: sqlite.db,
         plugins,
         onElicitation: "accept-all",
         oauthEndpointUrlPolicy: { allowHttp: true },

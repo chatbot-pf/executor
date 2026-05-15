@@ -39,15 +39,13 @@ import {
   SetSecretInput,
   TokenMaterial,
   OAUTH2_PROVIDER_KEY,
-  collectSchemas,
   createExecutor,
   definePlugin,
-  makeInMemoryBlobStore,
   type InvokeOptions,
   type SecretProvider,
 } from "@executor-js/sdk";
+import { makeTestConfig } from "@executor-js/sdk/testing";
 import { serveTestHttpApp } from "@executor-js/sdk/testing";
-import { makeMemoryAdapter } from "@executor-js/storage-core/testing/memory";
 
 import { openApiPlugin } from "./plugin";
 import { OAuth2SourceConfig, OpenApiSourceBindingInput } from "./types";
@@ -157,10 +155,7 @@ const makeExecutor = () =>
       openApiPlugin({ httpClientLayer: clientLayer }),
       memorySecretsPlugin(),
     ] as const;
-
-    const schema = collectSchemas(plugins);
-    const adapter = makeMemoryAdapter({ schema });
-    const blobs = makeInMemoryBlobStore();
+    const config = makeTestConfig({ plugins });
 
     const scopeId = ScopeId.make("test-scope");
     const scope = Scope.make({
@@ -169,9 +164,8 @@ const makeExecutor = () =>
       createdAt: new Date(),
     });
     const executor = yield* createExecutor({
+      ...config,
       scopes: [scope],
-      adapter,
-      blobs,
       plugins,
       onElicitation: "accept-all",
     });

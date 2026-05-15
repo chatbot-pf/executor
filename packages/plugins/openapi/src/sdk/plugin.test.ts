@@ -15,8 +15,7 @@ import type { AddressInfo } from "node:net";
 import {
   createExecutor,
   definePlugin,
-  type DBAdapter,
-  makeTestConfig,
+  type FumaDb,
   RemoveSecretInput,
   Scope,
   ScopeId,
@@ -24,8 +23,8 @@ import {
   SetSecretInput,
   type InvokeOptions,
   type SecretProvider,
-  type Where,
 } from "@executor-js/sdk";
+import { makeTestConfig } from "@executor-js/sdk/testing";
 import { memorySecretsPlugin } from "@executor-js/sdk/testing";
 import type { ConfigFileSink } from "@executor-js/config";
 
@@ -36,28 +35,26 @@ import { makeOpenApiTestServer } from "../testing";
 
 const autoApprove: InvokeOptions = { onElicitation: "accept-all" };
 
-type FindManyCall = {
-  readonly model: string;
-  readonly where?: readonly Where[];
+type FumaQueryCall = {
+  readonly method: "findFirst" | "findMany";
+  readonly table: string;
 };
 
-const recordFindMany = (adapter: DBAdapter, calls: FindManyCall[]): DBAdapter => ({
-  ...adapter,
-  findMany: (data) => {
-    calls.push({ model: data.model, where: data.where });
-    return adapter.findMany(data);
-  },
-  transaction: (callback) =>
-    adapter.transaction((trx) =>
-      callback({
-        ...trx,
-        findMany: (data) => {
-          calls.push({ model: data.model, where: data.where });
-          return trx.findMany(data);
-        },
-      }),
-    ),
-});
+const recordFumaQueries = (db: FumaDb, calls: FumaQueryCall[]): FumaDb =>
+  new Proxy(db, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop !== "findFirst" && prop !== "findMany") return value;
+      return (table: string, ...args: readonly unknown[]) => {
+        calls.push({ method: prop, table });
+        return (value as (tableName: string, ...innerArgs: readonly unknown[]) => unknown).call(
+          target,
+          table,
+          ...args,
+        );
+      };
+    },
+  });
 
 // ---------------------------------------------------------------------------
 // Define a test API with Effect HttpApi
@@ -926,8 +923,8 @@ layer(TestLayer)("OpenAPI Plugin", (it) => {
 
   // -------------------------------------------------------------------------
   // Multi-scope shadowing — regression suite covering the bug class where
-  // store reads/writes that don't pin scope_id collapse onto whichever row
-  // the scoped adapter's `scope_id IN (stack)` filter sees first. Each
+  // store reads/writes that don't pin scope_id collapse onto whichever visible
+  // row wins first. Each
   // scenario is reproducible against the pre-fix store.
   // -------------------------------------------------------------------------
 
@@ -991,11 +988,11 @@ layer(TestLayer)("OpenAPI Plugin", (it) => {
         scopes: stackedScopes,
         plugins: [openApiPlugin({ httpClientLayer: clientLayer }), memorySecretsPlugin()] as const,
       });
-      const findManyCalls: FindManyCall[] = [];
+      const queryCalls: FumaQueryCall[] = [];
 
       const executor = yield* createExecutor({
         ...config,
-        adapter: recordFindMany(config.adapter, findManyCalls),
+        db: recordFumaQueries(config.db, queryCalls),
       });
 
       yield* executor.openapi.addSpec({
@@ -1012,11 +1009,13 @@ layer(TestLayer)("OpenAPI Plugin", (it) => {
         name: "User Source",
       });
 
-      findManyCalls.length = 0;
+      queryCalls.length = 0;
       const userView = yield* executor.openapi.getSource("shared", String(USER_SCOPE));
 
       expect(userView?.config.baseUrl).toBe("https://org.example.com");
-      expect(findManyCalls.some((call) => call.model === "openapi_source")).toBe(false);
+      expect(
+        queryCalls.some((call) => call.method === "findMany" && call.table === "openapi_source"),
+      ).toBe(false);
     }),
   );
 
@@ -1178,6 +1177,7 @@ layer(TestLayer)("OpenAPI Plugin", (it) => {
             plugins: [openApiPlugin(), memorySecretsPlugin()] as const,
           });
           const executor = yield* createExecutor(config);
+          const db = config.db;
 
           yield* executor.secrets.set(
             SetSecretInput.make({
@@ -1206,13 +1206,15 @@ layer(TestLayer)("OpenAPI Plugin", (it) => {
             name: "User Shadow",
           });
 
-          const userRowsBefore = yield* config.adapter.findMany({
-            model: "openapi_source_spec_fetch_header",
-            where: [
-              { field: "scope_id", value: String(USER_SCOPE) },
-              { field: "source_id", value: "shared_spec_fetch" },
-            ],
-          });
+          const userRowsBefore = yield* Effect.promise(() =>
+            db.findMany("openapi_source_spec_fetch_header", {
+              where: (b) =>
+                b.and(
+                  b("scope_id", "=", String(USER_SCOPE)),
+                  b("source_id", "=", "shared_spec_fetch"),
+                ),
+            }),
+          );
           expect(userRowsBefore).toEqual([]);
 
           const requestsBefore = server.requestCount();
@@ -1223,20 +1225,24 @@ layer(TestLayer)("OpenAPI Plugin", (it) => {
 
           expect(server.requestCount()).toBeGreaterThan(requestsBefore);
           expect(server.lastToken()).toBe("org-token");
-          const orgRowsAfter = yield* config.adapter.findMany({
-            model: "openapi_source_spec_fetch_header",
-            where: [
-              { field: "scope_id", value: String(ORG_SCOPE) },
-              { field: "source_id", value: "shared_spec_fetch" },
-            ],
-          });
-          const userRowsAfter = yield* config.adapter.findMany({
-            model: "openapi_source_spec_fetch_header",
-            where: [
-              { field: "scope_id", value: String(USER_SCOPE) },
-              { field: "source_id", value: "shared_spec_fetch" },
-            ],
-          });
+          const orgRowsAfter = yield* Effect.promise(() =>
+            db.findMany("openapi_source_spec_fetch_header", {
+              where: (b) =>
+                b.and(
+                  b("scope_id", "=", String(ORG_SCOPE)),
+                  b("source_id", "=", "shared_spec_fetch"),
+                ),
+            }),
+          );
+          const userRowsAfter = yield* Effect.promise(() =>
+            db.findMany("openapi_source_spec_fetch_header", {
+              where: (b) =>
+                b.and(
+                  b("scope_id", "=", String(USER_SCOPE)),
+                  b("source_id", "=", "shared_spec_fetch"),
+                ),
+            }),
+          );
           expect(orgRowsAfter).toHaveLength(1);
           expect(userRowsAfter).toEqual([]);
         }),

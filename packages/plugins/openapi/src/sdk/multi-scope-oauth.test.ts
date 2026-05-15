@@ -27,11 +27,9 @@ import {
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 
 import {
-  collectSchemas,
   ConnectionId,
   createExecutor,
   definePlugin,
-  makeInMemoryBlobStore,
   Scope,
   ScopeId,
   SecretId,
@@ -39,8 +37,8 @@ import {
   type InvokeOptions,
   type SecretProvider,
 } from "@executor-js/sdk";
+import { makeTestConfig } from "@executor-js/sdk/testing";
 import { serveTestHttpApp } from "@executor-js/sdk/testing";
-import { makeMemoryAdapter } from "@executor-js/storage-core/testing/memory";
 
 import { openApiPlugin } from "./plugin";
 import { OAuth2SourceConfig, OpenApiSourceBindingInput } from "./types";
@@ -166,10 +164,7 @@ layer(TestLayer)("OpenAPI multi-scope OAuth", (it) => {
         openApiPlugin({ httpClientLayer: clientLayer }),
         memorySecretsPlugin(),
       ] as const;
-
-      const schema = collectSchemas(plugins);
-      const adapter = makeMemoryAdapter({ schema });
-      const blobs = makeInMemoryBlobStore();
+      const config = makeTestConfig({ plugins });
 
       const now = new Date();
       const orgScope = Scope.make({
@@ -189,23 +184,20 @@ layer(TestLayer)("OpenAPI multi-scope OAuth", (it) => {
       });
 
       const adminExec = yield* createExecutor({
+        ...config,
         scopes: [orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const aliceExec = yield* createExecutor({
+        ...config,
         scopes: [aliceScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const bobExec = yield* createExecutor({
+        ...config,
         scopes: [bobScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
@@ -454,10 +446,7 @@ layer(TestLayer)("OpenAPI multi-scope OAuth", (it) => {
         openApiPlugin({ httpClientLayer: clientLayer }),
         memorySecretsPlugin(),
       ] as const;
-
-      const schema = collectSchemas(plugins);
-      const adapter = makeMemoryAdapter({ schema });
-      const blobs = makeInMemoryBlobStore();
+      const config = makeTestConfig({ plugins });
 
       const now = new Date();
       const orgScope = Scope.make({
@@ -477,23 +466,20 @@ layer(TestLayer)("OpenAPI multi-scope OAuth", (it) => {
       });
 
       const adminExec = yield* createExecutor({
+        ...config,
         scopes: [orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const aliceExec = yield* createExecutor({
+        ...config,
         scopes: [aliceScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const bobExec = yield* createExecutor({
+        ...config,
         scopes: [bobScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });

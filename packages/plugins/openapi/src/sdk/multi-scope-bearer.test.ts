@@ -30,10 +30,8 @@ import { HttpClient, HttpRouter, HttpServerRequest } from "effect/unstable/http"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 
 import {
-  collectSchemas,
   createExecutor,
   definePlugin,
-  makeInMemoryBlobStore,
   Scope,
   ScopeId,
   SecretId,
@@ -42,7 +40,7 @@ import {
   type InvokeOptions,
   type SecretProvider,
 } from "@executor-js/sdk";
-import { makeMemoryAdapter } from "@executor-js/storage-core/testing/memory";
+import { makeTestConfig } from "@executor-js/sdk/testing";
 
 import { openApiPlugin } from "./plugin";
 import { ConfiguredHeaderBinding, OpenApiSourceBindingInput } from "./types";
@@ -127,9 +125,7 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
       // One adapter + blob store backing all three executors: mirrors a
       // multi-tenant deployment where admin + users share infra but
       // each sits at a different scope stack.
-      const schema = collectSchemas(plugins);
-      const adapter = makeMemoryAdapter({ schema });
-      const blobs = makeInMemoryBlobStore();
+      const config = makeTestConfig({ plugins });
 
       const now = new Date();
       const orgScope = Scope.make({
@@ -149,23 +145,20 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
       });
 
       const adminExec = yield* createExecutor({
+        ...config,
         scopes: [orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const aliceExec = yield* createExecutor({
+        ...config,
         scopes: [aliceScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const bobExec = yield* createExecutor({
+        ...config,
         scopes: [bobScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
@@ -373,10 +366,7 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
         openApiPlugin({ httpClientLayer: clientLayer }),
         memorySecretsPlugin(),
       ] as const;
-
-      const schema = collectSchemas(plugins);
-      const adapter = makeMemoryAdapter({ schema });
-      const blobs = makeInMemoryBlobStore();
+      const config = makeTestConfig({ plugins });
 
       const now = new Date();
       const orgScope = Scope.make({
@@ -396,23 +386,20 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
       });
 
       const adminExec = yield* createExecutor({
+        ...config,
         scopes: [orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const aliceExec = yield* createExecutor({
+        ...config,
         scopes: [aliceScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const bobExec = yield* createExecutor({
+        ...config,
         scopes: [bobScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
@@ -519,10 +506,7 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
           openApiPlugin({ httpClientLayer: clientLayer }),
           memorySecretsPlugin(),
         ] as const;
-
-        const schema = collectSchemas(plugins);
-        const adapter = makeMemoryAdapter({ schema });
-        const blobs = makeInMemoryBlobStore();
+        const config = makeTestConfig({ plugins });
 
         const now = new Date();
         const orgScope = Scope.make({
@@ -537,16 +521,14 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
         });
 
         const adminExec = yield* createExecutor({
+          ...config,
           scopes: [orgScope],
-          adapter,
-          blobs,
           plugins,
           onElicitation: "accept-all",
         });
         const aliceExec = yield* createExecutor({
+          ...config,
           scopes: [aliceScope, orgScope],
-          adapter,
-          blobs,
           plugins,
           onElicitation: "accept-all",
         });
@@ -698,10 +680,7 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
         openApiPlugin({ httpClientLayer: clientLayer }),
         memorySecretsPlugin(),
       ] as const;
-
-      const schema = collectSchemas(plugins);
-      const adapter = makeMemoryAdapter({ schema });
-      const blobs = makeInMemoryBlobStore();
+      const config = makeTestConfig({ plugins });
       const now = new Date();
       const orgScope = Scope.make({
         id: ScopeId.make("org"),
@@ -715,16 +694,14 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
       });
 
       const adminExec = yield* createExecutor({
+        ...config,
         scopes: [orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const aliceExec = yield* createExecutor({
+        ...config,
         scopes: [aliceScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
@@ -777,10 +754,7 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
           openApiPlugin({ httpClientLayer: clientLayer }),
           memorySecretsPlugin(),
         ] as const;
-
-        const schema = collectSchemas(plugins);
-        const adapter = makeMemoryAdapter({ schema });
-        const blobs = makeInMemoryBlobStore();
+        const config = makeTestConfig({ plugins });
         const now = new Date();
         const orgScope = Scope.make({
           id: ScopeId.make("org"),
@@ -794,16 +768,14 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
         });
 
         const adminExec = yield* createExecutor({
+          ...config,
           scopes: [orgScope],
-          adapter,
-          blobs,
           plugins,
           onElicitation: "accept-all",
         });
         const aliceExec = yield* createExecutor({
+          ...config,
           scopes: [aliceScope, orgScope],
-          adapter,
-          blobs,
           plugins,
           onElicitation: "accept-all",
         });
@@ -883,9 +855,7 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
         openApiPlugin({ httpClientLayer: clientLayer }),
         memorySecretsPlugin(),
       ] as const;
-
-      const adapter = makeMemoryAdapter({ schema: collectSchemas(plugins) });
-      const blobs = makeInMemoryBlobStore();
+      const config = makeTestConfig({ plugins });
       const now = new Date();
       const orgScope = Scope.make({
         id: ScopeId.make("org"),
@@ -899,16 +869,14 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
       });
 
       const adminExec = yield* createExecutor({
+        ...config,
         scopes: [orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const userExec = yield* createExecutor({
+        ...config,
         scopes: [userScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
@@ -989,9 +957,7 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
         openApiPlugin({ httpClientLayer: clientLayer }),
         memorySecretsPlugin(),
       ] as const;
-
-      const adapter = makeMemoryAdapter({ schema: collectSchemas(plugins) });
-      const blobs = makeInMemoryBlobStore();
+      const config = makeTestConfig({ plugins });
       const now = new Date();
       const orgScope = Scope.make({
         id: ScopeId.make("org"),
@@ -1005,16 +971,14 @@ layer(TestLayer)("OpenAPI multi-scope bearer (Vercel-style)", (it) => {
       });
 
       const adminExec = yield* createExecutor({
+        ...config,
         scopes: [orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
       const userExec = yield* createExecutor({
+        ...config,
         scopes: [userScope, orgScope],
-        adapter,
-        blobs,
         plugins,
         onElicitation: "accept-all",
       });
