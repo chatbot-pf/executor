@@ -2,7 +2,12 @@ import { useMemo, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { toolSchemaAtom } from "../api/atoms";
-import { ScopeId, ToolId, type EffectivePolicy, type ToolPolicyAction } from "@executor-js/sdk";
+import {
+  ScopeId,
+  ToolId,
+  type EffectivePolicy,
+  type ToolPolicyAction,
+} from "@executor-js/sdk/shared";
 import { Badge } from "./badge";
 import { Button } from "./button";
 import {
@@ -89,7 +94,6 @@ const breadcrumbParts = (name: string): string[] =>
 export function ToolDetail(props: {
   toolId: string;
   toolName: string;
-  toolDescription?: string;
   scopeId: ScopeId;
   /** Resolved effective policy — user-authored or plugin-default,
    *  unified into one shape. Surfaces in the header. */
@@ -111,8 +115,10 @@ export function ToolDetail(props: {
     }));
 
     return {
+      description: v.description,
       inputSchema: v.inputSchema,
       outputSchema: v.outputSchema,
+      schemaDefinitions: v.schemaDefinitions,
       inputTypeScript: v.inputTypeScript ? `type Input = ${v.inputTypeScript}` : null,
       outputTypeScript: v.outputTypeScript ? `type Output = ${v.outputTypeScript}` : null,
       definitions,
@@ -147,9 +153,9 @@ export function ToolDetail(props: {
               onClearPolicy={props.onClearPolicy}
             />
           </div>
-          {props.toolDescription && (
+          {data?.description && (
             <div className="mt-1.5 max-w-lg text-sm text-muted-foreground line-clamp-2">
-              <Markdown>{props.toolDescription}</Markdown>
+              <Markdown>{data.description}</Markdown>
             </div>
           )}
 
@@ -196,50 +202,72 @@ export function ToolDetail(props: {
             tab === "schema" ? (
               <div className="px-5 py-5 space-y-5">
                 {data?.inputSchema ? (
-                  <SchemaExplorer schema={data.inputSchema} title="Parameters" />
+                  <SchemaExplorer
+                    schema={data.inputSchema}
+                    schemaDefinitions={data.schemaDefinitions}
+                    title="Parameters"
+                  />
                 ) : (
                   <EmptySection title="Parameters" message="None" />
                 )}
                 {data?.outputSchema ? (
-                  <SchemaExplorer schema={data.outputSchema} title="Response" />
+                  <SchemaExplorer
+                    schema={data.outputSchema}
+                    schemaDefinitions={data.schemaDefinitions}
+                    title="Response"
+                  />
                 ) : (
                   <EmptySection title="Response" message="None" />
                 )}
               </div>
             ) : (
-              <div className="px-5 py-5 space-y-5">
-                {data?.inputTypeScript ? (
-                  <CardStack>
-                    <CardStackHeader>Input</CardStackHeader>
-                    <CardStackContent>
-                      <ExpandableCodeBlock
-                        code={data.inputTypeScript}
-                        definitions={data.definitions}
-                        className="rounded-none border-0"
-                      />
-                    </CardStackContent>
-                  </CardStack>
-                ) : (
-                  <EmptySection title="Input" message="void" />
-                )}
-                {data?.outputTypeScript ? (
-                  <CardStack>
-                    <CardStackHeader>Output</CardStackHeader>
-                    <CardStackContent>
-                      <ExpandableCodeBlock
-                        code={data.outputTypeScript}
-                        definitions={data.definitions}
-                        className="rounded-none border-0"
-                      />
-                    </CardStackContent>
-                  </CardStack>
-                ) : (
-                  <EmptySection title="Output" message="void" />
-                )}
-              </div>
+              <ToolTypeScriptPanel
+                inputTypeScript={data?.inputTypeScript ?? null}
+                outputTypeScript={data?.outputTypeScript ?? null}
+                definitions={data?.definitions ?? []}
+              />
             ),
         })}
       </div>
+    </div>
+  );
+}
+
+function ToolTypeScriptPanel(props: {
+  inputTypeScript: string | null;
+  outputTypeScript: string | null;
+  definitions: ReadonlyArray<{ name: string; code: string }>;
+}) {
+  return (
+    <div className="px-5 py-5 space-y-5">
+      {props.inputTypeScript ? (
+        <CardStack>
+          <CardStackHeader>Input</CardStackHeader>
+          <CardStackContent>
+            <ExpandableCodeBlock
+              code={props.inputTypeScript}
+              definitions={props.definitions}
+              className="rounded-none border-0"
+            />
+          </CardStackContent>
+        </CardStack>
+      ) : (
+        <EmptySection title="Input" message="void" />
+      )}
+      {props.outputTypeScript ? (
+        <CardStack>
+          <CardStackHeader>Output</CardStackHeader>
+          <CardStackContent>
+            <ExpandableCodeBlock
+              code={props.outputTypeScript}
+              definitions={props.definitions}
+              className="rounded-none border-0"
+            />
+          </CardStackContent>
+        </CardStack>
+      ) : (
+        <EmptySection title="Output" message="void" />
+      )}
     </div>
   );
 }

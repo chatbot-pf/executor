@@ -4,7 +4,7 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 import { connectionsAtom, sourceAtom } from "@executor-js/react/api/atoms";
 import { Badge } from "@executor-js/react/components/badge";
 import { useScope, useScopeStack, useUserScope } from "@executor-js/react/api/scope-context";
-import { ScopeId } from "@executor-js/sdk/core";
+import { ScopeId } from "@executor-js/sdk/shared";
 import {
   SourceCredentialNotice,
   SourceCredentialStatusBadge,
@@ -14,7 +14,7 @@ import {
 
 import { openApiSourceAtom, openApiSourceBindingsAtom } from "./atoms";
 import { effectiveBindingForScope } from "../sdk/credential-status";
-import { oauth2ClientSecretSlot, type StoredSourceSchemaType } from "../sdk/store";
+import { oauth2ClientSecretSlot, type StoredSourceSchemaType } from "../sdk/source-contracts";
 
 function OAuthBadge() {
   return <Badge variant="secondary">OAuth</Badge>;

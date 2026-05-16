@@ -1,8 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi";
 import { Schema } from "effect";
-import { ScopeId, ToolId, ToolNotFoundError } from "@executor-js/sdk";
-
-import { InternalError } from "../observability";
+import { InternalError, ScopeId, ToolId, ToolNotFoundError } from "@executor-js/sdk/shared";
 
 // ---------------------------------------------------------------------------
 // Params
@@ -29,11 +27,14 @@ const ToolMetadataResponse = Schema.Struct({
 
 const ToolSchemaResponse = Schema.Struct({
   id: ToolId,
+  name: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
   inputTypeScript: Schema.optional(Schema.String),
   outputTypeScript: Schema.optional(Schema.String),
   typeScriptDefinitions: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   inputSchema: Schema.optional(Schema.Unknown),
   outputSchema: Schema.optional(Schema.Unknown),
+  schemaDefinitions: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 });
 
 // ---------------------------------------------------------------------------

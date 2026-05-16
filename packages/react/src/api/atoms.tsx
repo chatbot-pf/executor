@@ -4,7 +4,7 @@ import {
   type ScopeId,
   type SecretId,
   type ToolId,
-} from "@executor-js/sdk";
+} from "@executor-js/sdk/shared";
 import * as Atom from "effect/unstable/reactivity/Atom";
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
 

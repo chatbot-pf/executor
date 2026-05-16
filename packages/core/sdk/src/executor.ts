@@ -122,7 +122,8 @@ import {
   type Tool,
   type ToolListFilter,
 } from "./types";
-import { buildToolTypeScriptPreview } from "./schema-types";
+import { buildToolTypeScriptPreview, type ToolTypeScriptPreview } from "./schema-types";
+import { collectReferencedDefinitions } from "./schema-refs";
 import { assertExecutorScopePolicyTable, type ExecutorScopePolicyContext } from "./scope-policy";
 import { validateHostedOutboundUrl } from "./hosted-http-client";
 
@@ -179,10 +180,9 @@ export type Executor<TPlugins extends readonly AnyPlugin[] = readonly []> = {
 
   readonly tools: {
     readonly list: (filter?: ToolListFilter) => Effect.Effect<readonly Tool[], StorageFailure>;
-    /** Fetch a tool's full schema view: JSON schemas with `$defs`
+    /** Fetch a tool's schema view: JSON schemas with `$defs`
      *  attached from the core `definition` table, plus TypeScript
-     *  preview strings rendered from them. Returns `null` for unknown
-     *  tool ids. */
+     *  preview strings. Returns `null` for unknown tool ids. */
     readonly schema: (toolId: string) => Effect.Effect<ToolSchema | null, StorageFailure>;
     /** Every `$defs` entry across every source, grouped by source id.
      *  Used for bulk schema export and downstream TypeScript rendering. */
@@ -2970,9 +2970,9 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
         return out;
       });
 
-    // Render the ToolSchema view for a tool — wraps the raw JSON schemas
-    // with attached `$defs` and runs them through the TypeScript preview
-    // helpers so the UI gets ready-to-display code samples.
+    // Render the ToolSchema view for a tool. Raw JSON schema roots stay small,
+    // while source-level definitions are returned once for the UI schema
+    // explorer and passed separately to the TypeScript preview compiler.
     const buildToolSchemaView = (opts: {
       toolId: string;
       name?: string;
@@ -2988,29 +2988,26 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
             )
           : {};
 
-        const attachDefs = (schema: unknown): unknown => {
-          if (schema == null || typeof schema !== "object") return schema;
-          if (Object.keys(defs).length === 0) return schema;
-          return { ...(schema as Record<string, unknown>), $defs: defs };
-        };
-
-        const inputSchema = attachDefs(opts.rawInput);
-        const outputSchema = attachDefs(opts.rawOutput);
-
-        const defsMap = new Map<string, unknown>(Object.entries(defs));
-        const preview = yield* Effect.sync(() =>
+        const sourceDefsMap = new Map<string, unknown>(Object.entries(defs));
+        const schemaDefinitions = collectReferencedDefinitions(
+          [opts.rawInput, opts.rawOutput],
+          sourceDefsMap,
+        );
+        const schemaDefsMap = new Map<string, unknown>(Object.entries(schemaDefinitions));
+        const preview: ToolTypeScriptPreview = yield* Effect.promise(() =>
           buildToolTypeScriptPreview({
-            inputSchema,
-            outputSchema,
-            defs: defsMap,
+            inputSchema: opts.rawInput,
+            outputSchema: opts.rawOutput,
+            defs: schemaDefsMap,
           }),
         ).pipe(
           Effect.withSpan("schema.compile.preview", {
             attributes: {
               "schema.kind": "tool.preview",
-              "schema.has_input": inputSchema !== undefined,
-              "schema.has_output": outputSchema !== undefined,
-              "schema.def_count": defsMap.size,
+              "schema.has_input": opts.rawInput !== undefined,
+              "schema.has_output": opts.rawOutput !== undefined,
+              "schema.def_count": schemaDefsMap.size,
+              "schema.source_def_count": sourceDefsMap.size,
             },
           }),
         );
@@ -3019,8 +3016,10 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
           id: ToolId.make(opts.toolId),
           name: opts.name,
           description: opts.description,
-          inputSchema,
-          outputSchema,
+          inputSchema: opts.rawInput,
+          outputSchema: opts.rawOutput,
+          schemaDefinitions:
+            Object.keys(schemaDefinitions).length > 0 ? schemaDefinitions : undefined,
           inputTypeScript: preview.inputTypeScript ?? undefined,
           outputTypeScript: preview.outputTypeScript ?? undefined,
           typeScriptDefinitions: preview.typeScriptDefinitions ?? undefined,
