@@ -8,7 +8,8 @@ import { randomUUID } from "node:crypto";
 
 import { Effect } from "effect";
 
-import type { Identity, Target } from "../src/target";
+import type { Capability, Identity, Target } from "../src/target";
+import { hasOpenCode } from "../src/clients/opencode";
 
 export const CLOUD_PORT = Number(process.env.E2E_CLOUD_PORT ?? 4798);
 export const CLOUD_DB_PORT = Number(process.env.E2E_CLOUD_DB_PORT ?? 5436);
@@ -54,7 +55,26 @@ export const cloudTarget = (): Target => ({
   name: "cloud",
   baseUrl: CLOUD_BASE_URL,
   mcpUrl: `${CLOUD_BASE_URL}/mcp`,
-  capabilities: new Set(["api", "browser", "billing", "mcp-oauth"]),
+  capabilities: new Set<Capability>([
+    "api",
+    "browser",
+    "billing",
+    "mcp-oauth",
+    // Cloud's authorization server is the WorkOS emulator, so token-expiry
+    // scenarios can compress the lifecycle.
+    "ttl-control",
+    // Real-client capability is environmental, not a property of the deployment.
+    ...(hasOpenCode() ? (["opencode"] as const) : []),
+  ]),
+  setAccessTokenTtl: (seconds) =>
+    Effect.promise(async () => {
+      const response = await fetch(`http://127.0.0.1:${WORKOS_EMULATOR_PORT}/_emulate/seed`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ oauth: { default_access_token_ttl_seconds: seconds } }),
+      });
+      if (!response.ok) throw new Error(`seeding emulator TTL failed (${response.status})`);
+    }),
   newIdentity: ({ org = true } = {}) =>
     Effect.promise(async (): Promise<Identity> => {
       const label = `user-${randomUUID().slice(0, 8)}`;
