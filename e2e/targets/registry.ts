@@ -2,6 +2,7 @@
 // once per worker. Adding a target = one factory entry here + a project in
 // vitest.config.ts + a globalsetup that boots (or attaches to) the instance.
 import type { Target } from "../src/target";
+import { cliTarget } from "./cli";
 import { cloudTarget } from "./cloud";
 import { cloudflareTarget } from "./cloudflare";
 import { desktopTarget } from "./desktop";
@@ -16,6 +17,11 @@ const factories: Record<string, () => Target> = {
   cloudflare: cloudflareTarget,
   desktop: desktopTarget,
   local: localTarget,
+  // The supervised CLI daemon inside a VM, one project per guest OS — restart()
+  // is a real reboot. See setup/cli.globalsetup.ts.
+  "cli-macos": cliTarget,
+  "cli-linux": cliTarget,
+  "cli-windows": cliTarget,
 };
 
 let current: Target | undefined;

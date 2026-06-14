@@ -68,6 +68,21 @@ export default defineConfig({
         fileParallelism: true,
         testTimeout: 180_000,
       }),
+      // The supervised CLI daemon inside a guest VM, one project per OS. The
+      // globalsetup provisions a VM, `executor service install`s the daemon, and
+      // tunnels it; restart() reboots the guest for REAL, so restart-persistence
+      // proves the boot-time auto-start path. Needs tart (macOS/Linux) or an EC2
+      // credential (Windows); not part of the default `npm run test` chain — run
+      // with `vitest run --project cli-macos` (etc.) on the Mini.
+      ...(["macos", "linux", "windows"] as const).map((os) =>
+        project(`cli-${os}`, {
+          include: ["scenarios/restart-persistence.test.ts", "cli/**/*.test.ts"],
+          env: { E2E_TARGET: `cli-${os}`, E2E_VM_OS: os },
+          fileParallelism: false,
+          testTimeout: 300_000,
+          hookTimeout: 900_000,
+        }),
+      ),
     ],
   },
 });
