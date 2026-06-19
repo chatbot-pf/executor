@@ -23,7 +23,7 @@ const openApiOnlyPresets: readonly OpenApiPreset[] = [
     name: "GitHub REST",
     summary: "Repos, issues, pull requests, actions, and users.",
     url: "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json",
-    icon: "https://github.com/favicon.ico",
+    icon: "https://svgl.app/library/github_dark.svg",
     featured: true,
   },
   {
@@ -55,7 +55,7 @@ const openApiOnlyPresets: readonly OpenApiPreset[] = [
     name: "OpenAI",
     summary: "Models, files, responses, and fine-tuning.",
     url: "https://app.stainless.com/api/spec/documented/openai/openapi.documented.yml",
-    icon: "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons/openai.svg",
+    icon: "https://svgl.app/library/openai_dark.svg",
     featured: true,
   },
   {
@@ -63,7 +63,7 @@ const openApiOnlyPresets: readonly OpenApiPreset[] = [
     name: "Sentry",
     summary: "Error tracking, performance monitoring, and releases.",
     url: "https://raw.githubusercontent.com/getsentry/sentry-api-schema/main/openapi-derefed.json",
-    icon: "https://sentry-brand.storage.googleapis.com/sentry-glyph-black.png",
+    icon: "https://svgl.app/library/sentry.svg",
     featured: true,
   },
   {
@@ -136,7 +136,7 @@ const openApiOnlyPresets: readonly OpenApiPreset[] = [
     name: "Spotify",
     summary: "Tracks, albums, playlists, library, and playback.",
     url: "https://raw.githubusercontent.com/sonallux/spotify-web-api/refs/heads/main/official-spotify-open-api.yml",
-    icon: "https://spotify.com/favicon.ico",
+    icon: "https://svgl.app/library/spotify.svg",
   },
 ];
 

@@ -111,7 +111,7 @@ export const mcpPresets: readonly McpPreset[] = [
     summary: "Error monitoring, issues, and performance data.",
     url: "https://mcp.sentry.dev/mcp",
     endpoint: "https://mcp.sentry.dev/mcp",
-    icon: "https://sentry-brand.storage.googleapis.com/sentry-glyph-black.png",
+    icon: "https://svgl.app/library/sentry.svg",
   },
   {
     id: "cloudflare",
