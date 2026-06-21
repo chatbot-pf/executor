@@ -23,12 +23,6 @@ import {
 import { decodeOpenApiIntegrationConfig, type OpenApiIntegrationConfig } from "./config";
 import { OpenApiExtractionError, OpenApiOAuthError, OpenApiParseError } from "./errors";
 import { parse, resolveSpecText } from "./parse";
-import {
-  convertGoogleDiscoveryBundleToOpenApi,
-  convertGoogleDiscoveryToOpenApi,
-  fetchGoogleDiscoveryDocument,
-  isGoogleDiscoveryUrl,
-} from "./google-discovery";
 import { extract } from "./extract";
 import { previewSpecText, type SpecPreview } from "./preview";
 import { deriveAuthenticationTemplateFromPreview, firstBaseUrlForPreview } from "./derive-auth";
@@ -72,7 +66,7 @@ export interface OpenApiSpecConfig {
   readonly headers?: Record<string, string>;
   /** Static query params applied to every request. */
   readonly queryParams?: Record<string, string>;
-  /** Auth methods a connection's value renders through — canonical
+  /** Auth methods a connection's value renders through - canonical
    *  placements or the request-shaped authoring dialect. */
   readonly authenticationTemplate?: readonly AuthenticationInput[];
 }
@@ -93,7 +87,7 @@ export interface OpenApiConfigureInput {
 }
 
 /** What changed in the tool catalog when a spec was updated in place. Tool
- *  names, not addresses — the same diff applies to every connection. */
+ *  names, not addresses - the same diff applies to every connection. */
 export interface UpdateSpecResult {
   readonly slug: IntegrationSlug;
   readonly toolCount: number;
@@ -103,7 +97,7 @@ export interface UpdateSpecResult {
 
 export interface OpenApiUpdateSpecInput {
   /** New spec source. Omit to re-fetch from the integration's stored
-   *  `sourceUrl` / Google Discovery bundle URLs. */
+   *  `sourceUrl`. */
   readonly spec?: OpenApiSpecInput;
 }
 
@@ -125,7 +119,7 @@ export interface OpenApiPluginExtension {
     | StorageFailure
   >;
   /** Re-resolve the integration's spec (from its stored source URL, or the
-   *  provided input) and rebuild its tools IN PLACE — connections,
+   *  provided input) and rebuild its tools IN PLACE - connections,
    *  credentials, policies, and the curated description are untouched. */
   readonly updateSpec: (
     slug: string,
@@ -233,14 +227,6 @@ type StaticPreviewSpecOutput = typeof StaticPreviewSpecOutputSchema.Type;
 const OpenApiSpecInputSchema = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("url"), url: Schema.String }),
   Schema.Struct({ kind: Schema.Literal("blob"), value: Schema.String }),
-  Schema.Struct({
-    kind: Schema.Literal("googleDiscovery"),
-    url: Schema.String,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("googleDiscoveryBundle"),
-    urls: Schema.Array(Schema.String),
-  }),
 ]);
 
 const AuthenticationSchema = Schema.Union([
@@ -251,7 +237,7 @@ const AuthenticationSchema = Schema.Union([
     tokenUrl: Schema.String,
     scopes: Schema.Array(Schema.String),
   }),
-  // Credential methods are authored request-shaped — the ONE apikey input
+  // Credential methods are authored request-shaped - the ONE apikey input
   // dialect: `{ type: "apiKey", headers: { Authorization: ["Bearer ",
   // variable("token")] }, queryParams: { … } }`.
   ApiKeyAuthTemplate,
@@ -357,13 +343,10 @@ const staticPreviewOutput = (preview: SpecPreview): StaticPreviewSpecOutput => (
 });
 
 const specInputToSourceUrl = (spec: OpenApiSpecInput): string | undefined =>
-  spec.kind === "url" || spec.kind === "googleDiscovery" ? spec.url : undefined;
-
-const specInputToGoogleBundle = (spec: OpenApiSpecInput): readonly string[] | undefined =>
-  spec.kind === "googleDiscoveryBundle" ? spec.urls : undefined;
+  spec.kind === "url" ? spec.url : undefined;
 
 // ---------------------------------------------------------------------------
-// Declared auth methods — project the stored `authenticationTemplate` into the
+// Declared auth methods - project the stored `authenticationTemplate` into the
 // catalog's plugin-agnostic `AuthMethodDescriptor[]`. This mirrors the client's
 // `authMethodsFromConfig` (in the React auth-method-config module) on the
 // server so the catalog field is consistent. apikey/none projection comes from
@@ -410,20 +393,6 @@ export interface OpenApiPluginOptions {
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient, never, never>;
 }
 
-const fetchGoogleDiscoveryBundleConversion = (
-  urls: readonly string[],
-  httpClientLayer: Layer.Layer<HttpClient.HttpClient, never, never>,
-) =>
-  Effect.forEach(
-    urls,
-    (url) =>
-      fetchGoogleDiscoveryDocument(url).pipe(
-        Effect.provide(httpClientLayer),
-        Effect.map((documentText) => ({ discoveryUrl: url, documentText })),
-      ),
-    { concurrency: 4 },
-  ).pipe(Effect.flatMap((documents) => convertGoogleDiscoveryBundleToOpenApi({ documents })));
-
 export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
   const resolveSpecForInput = (
     spec: OpenApiSpecInput,
@@ -431,44 +400,10 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
   ): Effect.Effect<
     {
       readonly specText: string;
-      readonly baseUrl?: string;
-      // The Google Discovery converters derive the `googleOAuth2` oauth template
-      // straight from the spec's declared scopes. `addSpec` adopts it when the
-      // caller didn't pass an explicit `authenticationTemplate` (the bundle add
-      // path has no preview to detect auth from).
-      readonly authenticationTemplate?: readonly Authentication[];
     },
     OpenApiParseError | OpenApiExtractionError | OpenApiOAuthError
   > =>
     Effect.gen(function* () {
-      if (spec.kind === "googleDiscovery") {
-        const conversion = yield* fetchGoogleDiscoveryDocument(spec.url).pipe(
-          Effect.provide(httpClientLayer),
-          Effect.flatMap((documentText) =>
-            convertGoogleDiscoveryToOpenApi({
-              discoveryUrl: spec.url,
-              documentText,
-            }),
-          ),
-        );
-        return {
-          specText: conversion.specText,
-          baseUrl: conversion.baseUrl,
-          ...(conversion.authenticationTemplate
-            ? { authenticationTemplate: conversion.authenticationTemplate }
-            : {}),
-        };
-      }
-      if (spec.kind === "googleDiscoveryBundle") {
-        const conversion = yield* fetchGoogleDiscoveryBundleConversion(spec.urls, httpClientLayer);
-        return {
-          specText: conversion.specText,
-          baseUrl: conversion.baseUrl,
-          ...(conversion.authenticationTemplate
-            ? { authenticationTemplate: conversion.authenticationTemplate }
-            : {}),
-        };
-      }
       if (spec.kind === "url") {
         const specText = yield* resolveSpecText(spec.url).pipe(Effect.provide(httpClientLayer));
         return { specText };
@@ -501,20 +436,19 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
 
           // Defaults the add page derives from its preview, applied here so
           // headless callers (MCP, API) get the same integration the UI's
-          // add flow would produce — see e2e/scenarios/connect-handoff.test.ts:
+          // add flow would produce - see e2e/scenarios/connect-handoff.test.ts:
           //   - effectiveBaseUrl: the spec's first server, used to anchor the
           //     derived auth template's absolute URLs. It is NOT stored as the
-          //     connection baseUrl — the request host is resolved per call from
+          //     connection baseUrl - the request host is resolved per call from
           //     the operation's extracted `servers`.
           //   - authenticationTemplate: the spec's declared security schemes
           //     (else the Add-connection modal is a dead "No authentication"
           //     end with nowhere to paste a credential)
           // An explicit input always wins; for auth, an explicit EMPTY array
           // means "no auth methods" and suppresses the derivation.
-          const explicitBaseUrl = config.baseUrl ?? resolved.baseUrl;
+          const explicitBaseUrl = config.baseUrl;
           const needsDerivedBaseUrl = explicitBaseUrl == null;
-          const needsDerivedAuth =
-            config.authenticationTemplate == null && resolved.authenticationTemplate == null;
+          const needsDerivedAuth = config.authenticationTemplate == null;
           const preview =
             needsDerivedBaseUrl || needsDerivedAuth
               ? yield* previewSpecText(resolved.specText)
@@ -546,33 +480,26 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
             ...(specInputToSourceUrl(config.spec) !== undefined
               ? { sourceUrl: specInputToSourceUrl(config.spec) }
               : {}),
-            ...(specInputToGoogleBundle(config.spec) !== undefined
-              ? { googleDiscoveryUrls: specInputToGoogleBundle(config.spec) }
-              : {}),
             // baseUrl is an optional override only. The host is otherwise
             // resolved per call from the operation's `servers` (extracted from
             // the spec), so we never bake a derived base URL into the config.
             ...(config.baseUrl ? { baseUrl: config.baseUrl } : {}),
             ...(config.headers ? { headers: config.headers } : {}),
             ...(config.queryParams ? { queryParams: config.queryParams } : {}),
-            // Prefer the caller's explicit template; otherwise adopt the one the
-            // Google Discovery converter derived from the spec (the bundle add
-            // path relies on this — it has no preview to detect auth from);
-            // otherwise derive from the spec's declared security schemes.
+            // Prefer the caller's explicit template; otherwise derive from the
+            // spec's declared security schemes.
             ...(config.authenticationTemplate
               ? {
                   authenticationTemplate: normalizeOpenApiAuthInputs(config.authenticationTemplate),
                 }
-              : resolved.authenticationTemplate
-                ? { authenticationTemplate: resolved.authenticationTemplate }
-                : derivedAuthenticationTemplate && derivedAuthenticationTemplate.length > 0
-                  ? { authenticationTemplate: derivedAuthenticationTemplate }
-                  : {}),
+              : derivedAuthenticationTemplate && derivedAuthenticationTemplate.length > 0
+                ? { authenticationTemplate: derivedAuthenticationTemplate }
+                : {}),
           };
 
           // The spec blob is written OUTSIDE the transaction: it's
           // content-addressed (re-puts are idempotent) and an aborted register
-          // leaves only an unreferenced blob behind — while blob backends like
+          // leaves only an unreferenced blob behind - while blob backends like
           // R2 couldn't roll back with the transaction anyway.
           yield* ctx.storage.putSpec(specHash, resolved.specText);
 
@@ -585,9 +512,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
                   config.description ?? compiled.description ?? compiled.title ?? config.slug,
                 config: integrationConfig satisfies OpenApiIntegrationConfig as IntegrationConfig,
                 canRemove: true,
-                canRefresh:
-                  specInputToSourceUrl(config.spec) != null ||
-                  specInputToGoogleBundle(config.spec) != null,
+                canRefresh: specInputToSourceUrl(config.spec) != null,
               });
               yield* ctx.storage.putOperations(
                 config.slug,
@@ -602,7 +527,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
       // Update the spec IN PLACE: re-resolve (stored source URL / bundle, or a
       // caller-supplied new input), recompile, swap the stored operations, and
       // rebuild every connection's tools. Auth templates, base URL, headers,
-      // the curated description, connections, and policies are all untouched —
+      // the curated description, connections, and policies are all untouched -
       // this is the "spec changed upstream" path, not a re-add.
       const updateSpec = (rawSlug: string, input?: OpenApiUpdateSpecInput) =>
         Effect.gen(function* () {
@@ -617,14 +542,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
           // where the spec originally came from. A pasted-blob integration has
           // no origin, so updating it requires a new input.
           const specInput: OpenApiSpecInput | null =
-            input?.spec ??
-            (current.googleDiscoveryUrls
-              ? { kind: "googleDiscoveryBundle", urls: current.googleDiscoveryUrls }
-              : current.sourceUrl
-                ? isGoogleDiscoveryUrl(current.sourceUrl)
-                  ? { kind: "googleDiscovery", url: current.sourceUrl }
-                  : { kind: "url", url: current.sourceUrl }
-                : null);
+            input?.spec ?? (current.sourceUrl ? { kind: "url", url: current.sourceUrl } : null);
           if (specInput === null) {
             return yield* new OpenApiParseError({
               message:
@@ -643,7 +561,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
 
           // The resolved spec text lives in the plugin blob store keyed by its
           // content hash (`spec/<hash>`); the config carries only the hash. Put
-          // the blob outside the transaction — re-puts are idempotent and an
+          // the blob outside the transaction - re-puts are idempotent and an
           // aborted config update just leaves an unreferenced blob.
           const specHash = yield* sha256Hex(resolved.specText);
           yield* ctx.storage.putSpec(specHash, resolved.specText);
@@ -653,9 +571,6 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
             specHash,
             ...(specInputToSourceUrl(specInput) !== undefined
               ? { sourceUrl: specInputToSourceUrl(specInput) }
-              : {}),
-            ...(specInputToGoogleBundle(specInput) !== undefined
-              ? { googleDiscoveryUrls: specInputToGoogleBundle(specInput) }
               : {}),
           };
 
@@ -709,18 +624,9 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
         previewSpec: (input: string | OpenApiPreviewInput) =>
           Effect.gen(function* () {
             const previewInput = typeof input === "string" ? { spec: input } : input;
-            const specText = isGoogleDiscoveryUrl(previewInput.spec)
-              ? yield* fetchGoogleDiscoveryDocument(previewInput.spec).pipe(
-                  Effect.provide(httpClientLayer),
-                  Effect.flatMap((documentText) =>
-                    convertGoogleDiscoveryToOpenApi({
-                      discoveryUrl: previewInput.spec,
-                      documentText,
-                    }),
-                  ),
-                  Effect.map((conversion) => conversion.specText),
-                )
-              : yield* resolveSpecText(previewInput.spec).pipe(Effect.provide(httpClientLayer));
+            const specText = yield* resolveSpecText(previewInput.spec).pipe(
+              Effect.provide(httpClientLayer),
+            );
             return yield* previewSpecText(specText);
           }),
 
@@ -822,7 +728,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
           tool({
             name: "addSpec",
             description:
-              "Add an OpenAPI integration to the catalog and persist its operations as tools. Recommended flow: call `previewSpec`, choose a `slug`, then create a connection for that integration with the user's API key or via `oauth.start`. When `baseUrl` is omitted it defaults to the spec's first server; when `authenticationTemplate` is omitted the auth methods are derived from the spec's declared security schemes (pass an explicit template to override how a credential is applied — apiKey header/query, or oauth bearer — or an empty array for no auth methods).",
+              "Add an OpenAPI integration to the catalog and persist its operations as tools. Recommended flow: call `previewSpec`, choose a `slug`, then create a connection for that integration with the user's API key or via `oauth.start`. When `baseUrl` is omitted it defaults to the spec's first server; when `authenticationTemplate` is omitted the auth methods are derived from the spec's declared security schemes (pass an explicit template to override how a credential is applied - apiKey header/query, or oauth bearer - or an empty array for no auth methods).",
             annotations: {
               requiresApproval: true,
               approvalDescription: "Add an OpenAPI integration",
@@ -874,7 +780,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
     describeIntegrationDisplay: describeOpenApiIntegrationDisplay,
 
     // Produce one tool per spec operation. Spec-derived, identical for every
-    // connection on the integration — so `getValue` is never called here. The
+    // connection on the integration - so `getValue` is never called here. The
     // operation bindings invokeTool needs are persisted at addSpec time; this
     // hook only shapes the per-connection ToolDefs from the spec blob the
     // catalog config points at.
@@ -916,31 +822,6 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
           catch: (error) => error,
         }).pipe(Effect.option);
         if (Option.isNone(parsed)) return null;
-        if (isGoogleDiscoveryUrl(trimmed)) {
-          const conversion = yield* fetchGoogleDiscoveryDocument(trimmed).pipe(
-            Effect.provide(httpClientLayer),
-            Effect.flatMap((documentText) =>
-              convertGoogleDiscoveryToOpenApi({
-                discoveryUrl: trimmed,
-                documentText,
-              }),
-            ),
-            Effect.catch(() => Effect.succeed(null)),
-          );
-          if (conversion) {
-            return IntegrationDetectionResult.make({
-              kind: "openapi",
-              confidence: "high",
-              endpoint: trimmed,
-              name: conversion.title,
-              slug:
-                conversion.title
-                  .toLowerCase()
-                  .replace(/[^a-z0-9]+/g, "_")
-                  .replace(/^_+|_+$/g, "") || `google_${conversion.service}`,
-            });
-          }
-        }
         const specText = yield* resolveSpecText(trimmed).pipe(
           Effect.provide(httpClientLayer),
           Effect.catch(() => Effect.succeed(null)),

@@ -1,9 +1,6 @@
 import { expect, it } from "@effect/vitest";
 
-import {
-  compactGoogleOAuthScopes,
-  filterGoogleUserConsentOAuthScopes,
-} from "./google-oauth-scopes";
+import { compactGoogleOAuthScopes, filterGoogleUserConsentOAuthScopes } from "./oauth-scopes";
 
 it("filters Google scopes that cannot be shown on a user OAuth consent screen", () => {
   expect(

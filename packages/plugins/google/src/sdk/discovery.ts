@@ -5,11 +5,14 @@
 import { Effect, Option, Predicate, Schema, SchemaGetter } from "effect";
 import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
-import { OpenApiParseError } from "./errors";
-import { compactGoogleOAuthScopes } from "./google-oauth-scopes";
-import type { SpecFetchCredentials } from "./parse";
-import type { Authentication } from "./types";
+import { OpenApiParseError, type Authentication } from "@executor-js/plugin-openapi";
+import { compactGoogleOAuthScopes } from "./oauth-scopes";
 import { AuthTemplateSlug } from "@executor-js/sdk/shared";
+
+interface SpecFetchCredentials {
+  readonly headers?: Record<string, string>;
+  readonly queryParams?: Record<string, string>;
+}
 
 const DISCOVERY_SERVICE_HOST = "https://www.googleapis.com/discovery/v1/apis";
 const GOOGLE_BUNDLE_BASE_URL = "https://www.googleapis.com/";
@@ -476,7 +479,7 @@ const discoveryScopes = (document: DiscoveryDocument): Record<string, string> =>
 // `userinfo.email` → `email`). Descriptions are preserved where the raw map had
 // them; compaction-introduced identity scopes (`email`/`profile`) fall back to
 // the broad parent's description. Per-operation `x-google-scopes`/`security`
-// stay RAW — they describe which scope each method needs, not consent.
+// stay RAW - they describe which scope each method needs, not consent.
 const compactDiscoveryScopeMap = (raw: Record<string, string>): Record<string, string> => {
   const descriptionFor = (scope: string): string => {
     if (raw[scope] !== undefined) return raw[scope];
@@ -615,7 +618,7 @@ const GOOGLE_OAUTH_SECURITY_SCHEME = "googleOAuth2";
  *  catalog-level template a connection's access token renders through. */
 const googleOauthTemplate = (scopes: Record<string, string>): readonly Authentication[] =>
   // A Google-discovery integration is ALWAYS OAuth, so it ALWAYS declares its
-  // oauth method — even when the compacted scope set is empty (e.g. a bundle of
+  // oauth method - even when the compacted scope set is empty (e.g. a bundle of
   // only limited-consent APIs like Google Keep, whose scopes Google won't grant
   // through standard consent). Without this the integration declares no auth
   // method and the "Add account" / "Add a connection" actions are disabled, so

@@ -17,9 +17,9 @@ import {
   googleOpenApiPresets,
   googlePresetForDiscoveryUrl,
   type GoogleOpenApiPreset,
-} from "./google-presets";
-import { googleOAuthConsentBatches } from "./google-oauth-batches";
-import { compactGoogleOAuthScopes } from "./google-oauth-scopes";
+} from "./presets";
+import { googleOAuthConsentBatches } from "./oauth-batches";
+import { compactGoogleOAuthScopes } from "./oauth-scopes";
 
 const batchInputsFor = (presetIds: readonly string[]) =>
   googleOpenApiPresets

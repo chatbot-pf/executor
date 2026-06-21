@@ -91,9 +91,6 @@ export const OpenApiHandlers = HttpApiBuilder.group(ExecutorApiWithOpenApi, "ope
           return config
             ? {
                 sourceUrl: config.sourceUrl,
-                googleDiscoveryUrls: config.googleDiscoveryUrls
-                  ? [...config.googleDiscoveryUrls]
-                  : undefined,
                 baseUrl: config.baseUrl,
                 headers: config.headers ? { ...config.headers } : undefined,
                 queryParams: config.queryParams ? { ...config.queryParams } : undefined,

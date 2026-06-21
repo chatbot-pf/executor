@@ -1,4 +1,11 @@
-import type { OpenApiPreset } from "./presets";
+export interface GooglePreset {
+  readonly id: string;
+  readonly name: string;
+  readonly summary: string;
+  readonly url?: string;
+  readonly icon?: string;
+  readonly featured?: boolean;
+}
 
 export type GoogleOpenApiOAuthAudience =
   | "standard-user"
@@ -6,7 +13,7 @@ export type GoogleOpenApiOAuthAudience =
   | "workspace-admin"
   | "unsupported-user";
 
-export type GoogleOpenApiPreset = OpenApiPreset & {
+export type GoogleOpenApiPreset = GooglePreset & {
   readonly oauthAudience: GoogleOpenApiOAuthAudience;
 };
 
@@ -16,7 +23,7 @@ const gd = (service: string, version: string) =>
 const GOOGLE_G = "https://fonts.gstatic.com/s/i/productlogos/googleg/v6/192px.svg";
 export const GOOGLE_BUNDLE_PRESET_ID = "google";
 
-export const googleOpenApiBundlePreset: OpenApiPreset = {
+export const googleOpenApiBundlePreset: GooglePreset = {
   id: GOOGLE_BUNDLE_PRESET_ID,
   name: "Google",
   summary: "Bundle Gmail, Calendar, Drive, Docs, and other Google APIs into one source.",
@@ -193,8 +200,8 @@ export const googleStandardUserOAuthPresets = googleOpenApiPresets.filter(
 //
 // The picker shows the OAuth consent a user is about to grant BEFORE connecting
 // (the "View scopes" panel), but the authoritative scope list only exists in
-// each API's live Discovery document — which the add flow fetches lazily at
-// `addSpec` time. To preview consent without N network round-trips, each preset
+// each API's live Discovery document, which the add flow fetches lazily at
+// `addBundle` time. To preview consent without N network round-trips, each preset
 // declares the broad top-level scope(s) a full integration grants. These flow
 // through `googleOAuthConsentBatches` (which compacts sub-scopes under their
 // broad parent), so the previewed grant matches the unioned scopes the bundle
@@ -253,7 +260,7 @@ export const googlePresetForDiscoveryUrl = (url: string): GoogleOpenApiPreset | 
   googlePresetsByNormalizedUrl.get(normalizeGooglePresetUrl(url));
 
 /** The distinct caution-tier audiences (`workspace-admin`, `unsupported-user`)
- *  among the supplied Discovery URLs — the ones whose consent the user should be
+ *  among the supplied Discovery URLs - the ones whose consent the user should be
  *  warned about. Returns `[]` when every URL is a standard/advanced API. */
 export const googleAudienceWarningsForUrls = (
   urls: readonly string[],

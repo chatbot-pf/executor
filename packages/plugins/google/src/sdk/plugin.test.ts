@@ -1,15 +1,14 @@
 // ---------------------------------------------------------------------------
-// Google bundle add flow — Option A ("customize your Google connection").
+// Google bundle add flow, "customize your Google connection".
 //
-// The product picker emits `{ kind: "googleDiscoveryBundle", urls }`; the
-// server fetches each Discovery document, merges them into ONE `google`
+// The product picker emits a URL list. The server fetches each Discovery
+// document, merges them into ONE `google`
 // integration spec, and stores the unioned `googleOAuth2` auth template. These
 // tests exercise that path end-to-end against a stubbed Discovery host:
 //   - a 3-API bundle (calendar + gmail + drive) produces a single `google`
 //     integration whose merged tools carry NO name collisions (each method id
 //     is service-prefixed) even when two APIs share a generic method name;
-//   - the stored oauth template carries the UNION of every API's scopes;
-//   - the per-API single-preset path (`kind: "googleDiscovery"`) is unchanged.
+//   - the stored oauth template carries the UNION of every API's scopes.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "@effect/vitest";
@@ -24,7 +23,7 @@ import {
 } from "@executor-js/sdk";
 import { makeTestConfig, memoryCredentialsPlugin } from "@executor-js/sdk/testing";
 
-import { openApiPlugin } from "./plugin";
+import { googlePlugin } from "./plugin";
 
 // --- Canned Discovery documents -------------------------------------------
 // Each carries one method. Calendar and Gmail BOTH expose a generic `list`
@@ -89,7 +88,7 @@ const gmailDoc = {
       resources: {
         messages: {
           methods: {
-            // Same trailing `list` as calendar.events.list — would collide on a
+            // Same trailing `list` as calendar.events.list - would collide on a
             // naive merge; service-prefixed method id keeps them distinct.
             list: {
               id: "gmail.users.messages.list",
@@ -126,7 +125,7 @@ const driveDoc = {
   resources: {
     files: {
       methods: {
-        // A third `list` — three generic method names across three APIs.
+        // A third `list` - three generic method names across three APIs.
         list: {
           id: "drive.files.list",
           httpMethod: "GET",
@@ -172,39 +171,33 @@ const discoveryHttpClientLayer = Layer.succeed(HttpClient.HttpClient)(
 );
 
 const bundlePlugins = () =>
-  [
-    openApiPlugin({ httpClientLayer: discoveryHttpClientLayer }),
-    memoryCredentialsPlugin(),
-  ] as const;
+  [googlePlugin({ httpClientLayer: discoveryHttpClientLayer }), memoryCredentialsPlugin()] as const;
 
 describe("Google bundle add flow", () => {
   it.effect(
-    "addSpec(googleDiscoveryBundle) merges calendar+gmail+drive into one google integration with no tool-name collisions",
+    "addBundle merges calendar+gmail+drive into one google integration with no tool-name collisions",
     () =>
       Effect.scoped(
         Effect.gen(function* () {
           const executor = yield* createExecutor(makeTestConfig({ plugins: bundlePlugins() }));
 
-          const result = yield* executor.openapi.addSpec({
-            spec: {
-              kind: "googleDiscoveryBundle",
-              urls: [CALENDAR_URL, GMAIL_URL, DRIVE_URL],
-            },
+          const result = yield* executor.google.addBundle({
+            urls: [CALENDAR_URL, GMAIL_URL, DRIVE_URL],
             slug: "google",
             description: "Google",
           });
           expect(String(result.slug)).toBe("google");
 
           // ONE integration, not three.
-          const integration = yield* executor.openapi.getIntegration("google");
+          const integration = yield* executor.google.getIntegration("google");
           expect(integration?.slug).toBe(IntegrationSlug.make("google"));
 
           // The stored oauth template carries the COMPACTED union of every API's
-          // scopes — the same set the picker previews and `oauth.start` requests.
+          // scopes - the same set the picker previews and `oauth.start` requests.
           // `calendar.readonly` collapses under `calendar`, and `gmail.readonly`
           // collapses under `https://mail.google.com/`, so the requested consent
           // is clean rather than the raw per-method union.
-          const config = yield* executor.openapi.getConfig("google");
+          const config = yield* executor.google.getConfig("google");
           const oauth = config?.authenticationTemplate?.find((entry) => entry.kind === "oauth2");
           expect(oauth?.kind === "oauth2" ? [...oauth.scopes].sort() : undefined).toEqual(
             [
@@ -233,37 +226,6 @@ describe("Google bundle add flow", () => {
           const googleTools = toolNames.filter((name) => name.endsWith(".list"));
           expect(new Set(googleTools).size).toBe(googleTools.length);
           expect(googleTools.length).toBe(3);
-        }),
-      ),
-  );
-
-  it.effect(
-    "single-API googleDiscovery path is unchanged (one integration, service-trimmed tools)",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const executor = yield* createExecutor(makeTestConfig({ plugins: bundlePlugins() }));
-
-          const result = yield* executor.openapi.addSpec({
-            spec: { kind: "googleDiscovery", url: CALENDAR_URL },
-            slug: "google-calendar",
-            description: "Google Calendar",
-          });
-          expect(String(result.slug)).toBe("google-calendar");
-
-          yield* executor.connections.create({
-            owner: "org",
-            name: ConnectionName.make("main"),
-            integration: IntegrationSlug.make("google-calendar"),
-            template: AuthTemplateSlug.make("googleOAuth2"),
-            value: "token-xyz",
-          });
-
-          // The single-API path trims the service prefix off the tool name
-          // (`events.list`, not `calendar.events.list`) — distinct from the bundle.
-          const toolNames = (yield* executor.tools.list()).map((tool) => String(tool.name));
-          expect(toolNames).toContain("events.list");
-          expect(toolNames).not.toContain("calendar.events.list");
         }),
       ),
   );

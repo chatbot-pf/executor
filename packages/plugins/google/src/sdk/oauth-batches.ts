@@ -1,5 +1,5 @@
-import type { GoogleOpenApiOAuthAudience } from "./google-presets";
-import { compactGoogleOAuthScopes } from "./google-oauth-scopes";
+import type { GoogleOpenApiOAuthAudience } from "./presets";
+import { compactGoogleOAuthScopes } from "./oauth-scopes";
 
 export type GoogleOAuthBatchInput = {
   readonly id: string;

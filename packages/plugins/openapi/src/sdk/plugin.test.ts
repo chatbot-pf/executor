@@ -105,7 +105,6 @@ const TestApi = HttpApi.make("testApi").add(ItemsGroup);
 const testApiSpecText = () => {
   const spec = makeOpenApiHttpApiTestSourceConfig(TestApi, {}).spec;
   if (spec.kind === "blob") return spec.value;
-  if (spec.kind === "googleDiscoveryBundle") return spec.urls[0] ?? "";
   return spec.url;
 };
 

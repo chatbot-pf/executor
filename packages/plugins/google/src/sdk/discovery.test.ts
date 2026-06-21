@@ -5,9 +5,8 @@ import { buildToolTypeScriptPreview } from "@executor-js/sdk/core";
 import {
   convertGoogleDiscoveryBundleToOpenApi,
   convertGoogleDiscoveryToOpenApi,
-} from "./google-discovery";
-import { extract } from "./extract";
-import { parse } from "./parse";
+} from "./discovery";
+import { extract, parse } from "@executor-js/plugin-openapi";
 
 const ConvertedOperation = Schema.Struct({
   operationId: Schema.String,
@@ -241,7 +240,7 @@ it.effect("converts Google Discovery documents into Executor-preserving OpenAPI 
     });
     // v2: the conversion now exposes a v2 oauth `authenticationTemplate` rather
     // than v1's `oauth2` source config.
-    // removed: identityScopes assertion — that field belonged to the v1
+    // removed: identityScopes assertion - that field belonged to the v1
     // OAuth2SourceConfig slot model, which no longer exists in v2.
     const oauthTemplate = result.authenticationTemplate?.find((entry) => entry.kind === "oauth2");
     expect(oauthTemplate).toBeDefined();
@@ -454,7 +453,7 @@ it.effect("bundles Google Discovery documents into one Google OpenAPI source", (
 // `calendar.*` → `calendar`, `userinfo.email` → `email`), and scopes a user
 // OAuth consent screen can't show (`chat.bot`, `chat.app.*`, `keep`) are
 // dropped. The persisted auth template, the spec `securitySchemes.googleOAuth2`
-// flow scopes, and the root `security` entry all agree — so the preview the
+// flow scopes, and the root `security` entry all agree - so the preview the
 // picker shows and the set `oauth.start` requests at connect are the same.
 // Per-operation `x-google-scopes`/`security` stay RAW (they describe per-method
 // scope needs, not consent).
@@ -595,7 +594,7 @@ it.effect("compacts and filters the merged bundle scope set into a clean consent
     expect([...(spec.security[0]?.["googleOAuth2"] ?? [])].sort()).toEqual(
       [...expectedConsentScopes].sort(),
     );
-    // Per-operation x-google-scopes stay RAW — a dropped consent scope can still
+    // Per-operation x-google-scopes stay RAW - a dropped consent scope can still
     // be the scope a given method advertises.
     expect(spec.paths["/v1/{name}"]?.get?.["x-google-scopes"]).toEqual([
       "https://www.googleapis.com/auth/chat.bot",

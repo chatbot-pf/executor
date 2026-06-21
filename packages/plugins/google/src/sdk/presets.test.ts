@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 
-import { googleOpenApiPresets, googleStandardUserOAuthPresets } from "./google-presets";
+import { googleOpenApiPresets, googleStandardUserOAuthPresets } from "./presets";
 
 it("keeps Select all limited to Google services that can use normal user OAuth", () => {
   const standardIds = new Set(googleStandardUserOAuthPresets.map((preset) => preset.id));

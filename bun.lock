@@ -65,6 +65,7 @@
         "@executor-js/execution": "workspace:*",
         "@executor-js/fumadb": "workspace:*",
         "@executor-js/host-mcp": "workspace:*",
+        "@executor-js/plugin-google": "workspace:*",
         "@executor-js/plugin-graphql": "workspace:*",
         "@executor-js/plugin-mcp": "workspace:*",
         "@executor-js/plugin-openapi": "workspace:*",
@@ -139,6 +140,7 @@
         "@executor-js/local": "workspace:*",
         "@executor-js/plugin-desktop-settings": "workspace:*",
         "@executor-js/plugin-file-secrets": "workspace:*",
+        "@executor-js/plugin-google": "workspace:*",
         "@executor-js/plugin-graphql": "workspace:*",
         "@executor-js/plugin-keychain": "workspace:*",
         "@executor-js/plugin-mcp": "workspace:*",
@@ -171,6 +173,7 @@
         "@executor-js/fumadb": "workspace:*",
         "@executor-js/host-mcp": "workspace:*",
         "@executor-js/plugin-encrypted-secrets": "workspace:*",
+        "@executor-js/plugin-google": "workspace:*",
         "@executor-js/plugin-graphql": "workspace:*",
         "@executor-js/plugin-mcp": "workspace:*",
         "@executor-js/plugin-openapi": "workspace:*",
@@ -217,6 +220,7 @@
         "@executor-js/fumadb": "workspace:*",
         "@executor-js/host-mcp": "workspace:*",
         "@executor-js/plugin-encrypted-secrets": "workspace:*",
+        "@executor-js/plugin-google": "workspace:*",
         "@executor-js/plugin-graphql": "workspace:*",
         "@executor-js/plugin-mcp": "workspace:*",
         "@executor-js/plugin-openapi": "workspace:*",
@@ -265,6 +269,7 @@
         "@executor-js/plugin-desktop-settings": "workspace:*",
         "@executor-js/plugin-example": "workspace:*",
         "@executor-js/plugin-file-secrets": "workspace:*",
+        "@executor-js/plugin-google": "workspace:*",
         "@executor-js/plugin-graphql": "workspace:*",
         "@executor-js/plugin-keychain": "workspace:*",
         "@executor-js/plugin-mcp": "workspace:*",
@@ -364,6 +369,7 @@
       "version": "0.0.33",
       "dependencies": {
         "@executor-js/plugin-file-secrets": "workspace:*",
+        "@executor-js/plugin-google": "workspace:*",
         "@executor-js/plugin-graphql": "workspace:*",
         "@executor-js/plugin-keychain": "workspace:*",
         "@executor-js/plugin-mcp": "workspace:*",
@@ -828,6 +834,43 @@
       "peerDependencies": {
         "effect": "catalog:",
       },
+    },
+    "packages/plugins/google": {
+      "name": "@executor-js/plugin-google",
+      "version": "1.5.14",
+      "dependencies": {
+        "@executor-js/plugin-openapi": "workspace:*",
+        "@executor-js/sdk": "workspace:*",
+        "lucide-react": "^1.7.0",
+      },
+      "devDependencies": {
+        "@effect/atom-react": "catalog:",
+        "@effect/vitest": "catalog:",
+        "@executor-js/api": "workspace:*",
+        "@executor-js/react": "workspace:*",
+        "@types/node": "catalog:",
+        "@types/react": "catalog:",
+        "bun-types": "catalog:",
+        "effect": "catalog:",
+        "react": "catalog:",
+        "tsup": "catalog:",
+        "vitest": "catalog:",
+      },
+      "peerDependencies": {
+        "@effect/atom-react": "catalog:",
+        "@executor-js/api": "workspace:*",
+        "@executor-js/react": "workspace:*",
+        "@tanstack/react-router": "catalog:",
+        "effect": "catalog:",
+        "react": "catalog:",
+      },
+      "optionalPeers": [
+        "@effect/atom-react",
+        "@executor-js/api",
+        "@executor-js/react",
+        "@tanstack/react-router",
+        "react",
+      ],
     },
     "packages/plugins/graphql": {
       "name": "@executor-js/plugin-graphql",
@@ -1581,6 +1624,8 @@
     "@executor-js/plugin-example": ["@executor-js/plugin-example@workspace:packages/plugins/example"],
 
     "@executor-js/plugin-file-secrets": ["@executor-js/plugin-file-secrets@workspace:packages/plugins/file-secrets"],
+
+    "@executor-js/plugin-google": ["@executor-js/plugin-google@workspace:packages/plugins/google"],
 
     "@executor-js/plugin-graphql": ["@executor-js/plugin-graphql@workspace:packages/plugins/graphql"],
 

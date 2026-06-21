@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 
-import { googleOAuthConsentBatches } from "./google-oauth-batches";
+import { googleOAuthConsentBatches } from "./oauth-batches";
 
 it("keeps core Google OAuth in one consent batch", () => {
   expect(

@@ -19,12 +19,12 @@ import {
   googleOpenApiPresets,
   type GoogleOpenApiOAuthAudience,
   type GoogleOpenApiPreset,
-} from "../sdk/google-presets";
-import { googleOAuthConsentBatches } from "../sdk/google-oauth-batches";
-import { isGoogleDiscoveryUrl } from "../sdk/google-discovery";
+} from "../sdk/presets";
+import { googleOAuthConsentBatches } from "../sdk/oauth-batches";
+import { isGoogleDiscoveryUrl } from "../sdk/discovery";
 
 // ---------------------------------------------------------------------------
-// GoogleProductPicker — the "customize your Google connection" surface.
+// GoogleProductPicker - the "customize your Google connection" surface.
 //
 // A checkable card grid over `googleOpenApiPresets`, grouped/annotated by
 // `oauthAudience`. The user picks which Google APIs to bundle into the single
@@ -53,7 +53,7 @@ const AUDIENCE_LABEL: Readonly<Record<GoogleOpenApiOAuthAudience, string>> = {
 };
 
 const AUDIENCE_DESCRIPTION: Readonly<Record<GoogleOpenApiOAuthAudience, string>> = {
-  "standard-user": "Connect with a normal Google account — one consent screen.",
+  "standard-user": "Connect with a normal Google account - one consent screen.",
   "advanced-user": "Broader scopes that may need an unverified-app warning to be accepted.",
   "workspace-admin": "Requires a Google Workspace admin account; not available on personal Gmail.",
   "unsupported-user": "Google does not grant these scopes through standard user OAuth consent.",
@@ -86,7 +86,7 @@ const AudienceWarningChip = ({ audience }: { audience: GoogleOpenApiOAuthAudienc
     </Badge>
   ) : null;
 
-// A Google API row — borderless and single-line, leaning on hover/selected
+// A Google API row - borderless and single-line, leaning on hover/selected
 // fills instead of per-item card chrome (lightest separation that still reads).
 // Name + truncated summary share one baseline for a dense, scannable two-column
 // list; the audience warning chip trails on the right.
@@ -112,7 +112,7 @@ const ProductRow = ({
     <div className="shrink-0">
       <IntegrationFavicon icon={preset.icon} url={preset.url} size={16} />
     </div>
-    {/* One truncating line — the name + summary clip to the cell with an
+    {/* One truncating line - the name + summary clip to the cell with an
         ellipsis instead of overflowing into the neighbouring column. */}
     <div className="min-w-0 flex-1 truncate text-sm">
       <span className="font-medium text-foreground">{preset.name}</span>{" "}

@@ -1,5 +1,6 @@
 import { defineExecutorConfig } from "@executor-js/sdk";
 import { openApiHttpPlugin } from "@executor-js/plugin-openapi/api";
+import { googleHttpPlugin } from "@executor-js/plugin-google/api";
 import { mcpHttpPlugin } from "@executor-js/plugin-mcp/api";
 import { graphqlHttpPlugin } from "@executor-js/plugin-graphql/api";
 import { encryptedSecretsPlugin } from "@executor-js/plugin-encrypted-secrets";
@@ -17,6 +18,7 @@ export default defineExecutorConfig({
   plugins: () =>
     [
       openApiHttpPlugin(),
+      googleHttpPlugin(),
       mcpHttpPlugin({ dangerouslyAllowStdioMCP: false }),
       graphqlHttpPlugin(),
       encryptedSecretsPlugin({ key: process.env.EXECUTOR_SECRET_KEY ?? "build-time-placeholder" }),
