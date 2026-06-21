@@ -143,6 +143,7 @@ import { connectionIdentifier } from "./connection-name-identifier";
 import { annotateToolResultOutcome } from "./tool-result";
 
 const PLUGIN_STORAGE_DELETE_KEY_BATCH_SIZE = 90;
+const PLUGIN_STORAGE_CREATE_ROW_BATCH_SIZE = 90;
 const MAX_APPROVAL_ARGUMENT_PREVIEW_CHARS = 4_000;
 
 // ---------------------------------------------------------------------------
@@ -982,20 +983,30 @@ const makePluginStorageFacade = (input: {
       yield* deleteManyImpl(owner, os.subject, uniqueEntries);
 
       const now = new Date();
-      yield* input.core.createMany(
-        "plugin_storage",
-        uniqueEntries.map((entry) => ({
-          tenant,
-          owner: os.owner,
-          subject: os.subject,
-          plugin_id: input.pluginId,
-          collection: entry.collection,
-          key: entry.key,
-          data: entry.data,
-          created_at: now,
-          updated_at: now,
-        })),
-      );
+      for (
+        let offset = 0;
+        offset < uniqueEntries.length;
+        offset += PLUGIN_STORAGE_CREATE_ROW_BATCH_SIZE
+      ) {
+        const batchEntries = uniqueEntries.slice(
+          offset,
+          offset + PLUGIN_STORAGE_CREATE_ROW_BATCH_SIZE,
+        );
+        yield* input.core.createMany(
+          "plugin_storage",
+          batchEntries.map((entry) => ({
+            tenant,
+            owner: os.owner,
+            subject: os.subject,
+            plugin_id: input.pluginId,
+            collection: entry.collection,
+            key: entry.key,
+            data: entry.data,
+            created_at: now,
+            updated_at: now,
+          })),
+        );
+      }
     });
 
   const removeManyImpl = (

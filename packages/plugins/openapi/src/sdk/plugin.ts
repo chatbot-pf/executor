@@ -7,10 +7,7 @@ import {
   IntegrationDetectionResult,
   IntegrationNotFoundError,
   IntegrationSlug,
-  ToolName,
-  ToolFileJsonSchema,
   ToolResult,
-  authToolFailure,
   definePlugin,
   mergeAuthTemplates,
   sha256Hex,
@@ -20,18 +17,10 @@ import {
   type IntegrationConfig,
   type IntegrationRecord,
   type PluginCtx,
-  type ResolveToolsResult,
   type StorageFailure,
-  type ToolDef,
-  type ToolInvocationCredential,
 } from "@executor-js/sdk/core";
 
-import {
-  decodeOpenApiIntegrationConfig,
-  renderAuthTemplate,
-  requiredTemplateVariables,
-  type OpenApiIntegrationConfig,
-} from "./config";
+import { decodeOpenApiIntegrationConfig, type OpenApiIntegrationConfig } from "./config";
 import { OpenApiExtractionError, OpenApiOAuthError, OpenApiParseError } from "./errors";
 import { parse, resolveSpecText } from "./parse";
 import {
@@ -41,98 +30,20 @@ import {
   isGoogleDiscoveryUrl,
 } from "./google-discovery";
 import { extract } from "./extract";
-import { compileToolDefinitions, type ToolDefinition } from "./definitions";
-import { annotationsForOperation, invokeWithLayer } from "./invoke";
-import { previewSpec, previewSpecText, type SpecPreview } from "./preview";
+import { previewSpecText, type SpecPreview } from "./preview";
 import { deriveAuthenticationTemplateFromPreview, firstBaseUrlForPreview } from "./derive-auth";
 import { openApiPresets } from "./presets";
-import { makeDefaultOpenapiStore, type OpenapiStore, type StoredOperation } from "./store";
+import { makeDefaultOpenapiStore, type OpenapiStore } from "./store";
 import type { Authentication } from "./types";
-import { OperationBinding, normalizeOpenApiAuthInputs, type AuthenticationInput } from "./types";
+import { normalizeOpenApiAuthInputs, type AuthenticationInput } from "./types";
 import { ApiKeyAuthTemplate, describeApiKeyAuthMethod } from "@executor-js/sdk/http-auth";
-
-// ---------------------------------------------------------------------------
-// Plugin config
-// ---------------------------------------------------------------------------
-
-const STRINGIFIED_BODY_CAP = 1024;
-const UpstreamMessageBody = Schema.Struct({ message: Schema.String });
-const UpstreamErrorMessageBody = Schema.Struct({ errorMessage: Schema.String });
-const UpstreamNestedErrorBody = Schema.Struct({ error: UpstreamMessageBody });
-const UpstreamErrorsArrayBody = Schema.Struct({
-  errors: Schema.Array(
-    Schema.Struct({
-      detail: Schema.optional(Schema.String),
-      message: Schema.optional(Schema.String),
-      title: Schema.optional(Schema.String),
-    }),
-  ),
-});
-const UpstreamDescriptionBody = Schema.Struct({
-  detail: Schema.optional(Schema.String),
-  title: Schema.optional(Schema.String),
-  description: Schema.optional(Schema.String),
-});
-
-const decodeUpstreamMessageBody = Schema.decodeUnknownOption(UpstreamMessageBody);
-const decodeUpstreamErrorMessageBody = Schema.decodeUnknownOption(UpstreamErrorMessageBody);
-const decodeUpstreamNestedErrorBody = Schema.decodeUnknownOption(UpstreamNestedErrorBody);
-const decodeUpstreamErrorsArrayBody = Schema.decodeUnknownOption(UpstreamErrorsArrayBody);
-const decodeUpstreamDescriptionBody = Schema.decodeUnknownOption(UpstreamDescriptionBody);
-
-const clampedStringify = (value: unknown): string => {
-  let s: string;
-  // oxlint-disable-next-line executor/no-try-catch-or-throw -- boundary: JSON.stringify may throw on cycles; fall back to String() so the upstream body can still be surfaced as ToolError.details fallback text
-  try {
-    s = JSON.stringify(value);
-  } catch {
-    s = String(value);
-  }
-  return s.length > STRINGIFIED_BODY_CAP ? `${s.slice(0, STRINGIFIED_BODY_CAP)}…` : s;
-};
-
-const firstNonEmpty = (...values: readonly (string | undefined)[]): string | undefined =>
-  values.find((value) => value !== undefined && value.length > 0);
-
-// Walk known upstream error-body shapes so ToolError.message stays concise
-// while ToolError.details preserves the original body.
-const extractUpstreamMessage = (body: unknown, status: number): string => {
-  if (typeof body === "string") {
-    return body.length > 0 ? body : `Upstream returned HTTP ${status}`;
-  }
-  const nested = Option.getOrUndefined(decodeUpstreamNestedErrorBody(body));
-  const messageBody = Option.getOrUndefined(decodeUpstreamMessageBody(body));
-  const errorMessageBody = Option.getOrUndefined(decodeUpstreamErrorMessageBody(body));
-  const errorsBody = Option.getOrUndefined(decodeUpstreamErrorsArrayBody(body));
-  const descriptionBody = Option.getOrUndefined(decodeUpstreamDescriptionBody(body));
-  const arrayMessage = errorsBody?.errors
-    .map(
-      ({
-        detail,
-        message: upstreamMessage,
-        title,
-      }: {
-        detail?: string;
-        message?: string;
-        title?: string;
-      }) => firstNonEmpty(detail, upstreamMessage, title),
-    )
-    .find((message: string | undefined) => message !== undefined);
-  const message = firstNonEmpty(
-    nested?.error.message,
-    messageBody?.message,
-    errorMessageBody?.errorMessage,
-    arrayMessage,
-    descriptionBody?.detail,
-    descriptionBody?.title,
-    descriptionBody?.description,
-  );
-  if (message !== undefined) return message;
-  if (body !== null && typeof body === "object") {
-    return clampedStringify(body);
-  }
-  return `Upstream returned HTTP ${status}`;
-};
+import {
+  compileOpenApiSpec,
+  invokeOpenApiBackedTool,
+  openApiStoredOperationsFromCompiled,
+  resolveOpenApiBackedAnnotations,
+  resolveOpenApiBackedTools,
+} from "./backing";
 
 // ---------------------------------------------------------------------------
 // Extension input shapes
@@ -381,38 +292,6 @@ const openApiToolFailure = (code: string, message: string, details?: unknown) =>
     ...(details === undefined ? {} : { details }),
   });
 
-const openApiAuthToolFailure = (failure: {
-  readonly code: string;
-  readonly message: string;
-  readonly owner: "org" | "user";
-  readonly integration: string;
-  readonly connection: string;
-  readonly credentialKind: "secret" | "oauth" | "upstream";
-  readonly credentialLabel?: string;
-  readonly status?: number;
-  readonly details?: unknown;
-}) =>
-  authToolFailure({
-    // The auth-tool-failure helper's code set is shared with v1; keep the
-    // string but reference the connection rather than v1's source/slot.
-    code: failure.code as Parameters<typeof authToolFailure>[0]["code"],
-    message: failure.message,
-    source: { id: failure.integration, scope: failure.owner },
-    credential: {
-      kind: failure.credentialKind,
-      ...(failure.credentialLabel ? { label: failure.credentialLabel } : {}),
-    },
-    ...(failure.status !== undefined ? { status: failure.status } : {}),
-    ...(failure.details !== undefined
-      ? {
-          upstream: {
-            ...(failure.status !== undefined ? { status: failure.status } : {}),
-            details: failure.details,
-          },
-        }
-      : {}),
-  });
-
 const staticPreviewOutput = (preview: SpecPreview): StaticPreviewSpecOutput => ({
   title: Option.getOrNull(preview.title),
   version: Option.getOrNull(preview.version),
@@ -477,58 +356,6 @@ const staticPreviewOutput = (preview: SpecPreview): StaticPreviewSpecOutput => (
   })),
 });
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Rewrite OpenAPI `#/components/schemas/X` refs to standard `#/$defs/X`. */
-const normalizeOpenApiRefs = (node: unknown): unknown => {
-  if (node == null || typeof node !== "object") return node;
-  if (Array.isArray(node)) {
-    let changed = false;
-    const out = node.map((item) => {
-      const n = normalizeOpenApiRefs(item);
-      if (n !== item) changed = true;
-      return n;
-    });
-    return changed ? out : node;
-  }
-
-  const obj = node as Record<string, unknown>;
-
-  if (typeof obj.$ref === "string") {
-    const match = obj.$ref.match(/^#\/components\/schemas\/(.+)$/);
-    if (match) return { ...obj, $ref: `#/$defs/${match[1]}` };
-    return obj;
-  }
-
-  let changed = false;
-  const result: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    const n = normalizeOpenApiRefs(v);
-    if (n !== v) changed = true;
-    result[k] = n;
-  }
-  return changed ? result : obj;
-};
-
-const toBinding = (def: ToolDefinition): OperationBinding =>
-  OperationBinding.make({
-    method: def.operation.method,
-    servers: def.operation.servers,
-    pathTemplate: def.operation.pathTemplate,
-    parameters: [...def.operation.parameters],
-    requestBody: def.operation.requestBody,
-    responseBody: def.operation.responseBody,
-  });
-
-const descriptionFor = (def: ToolDefinition): string => {
-  const op = def.operation;
-  return Option.getOrElse(op.description, () =>
-    Option.getOrElse(op.summary, () => `${op.method.toUpperCase()} ${op.pathTemplate}`),
-  );
-};
-
 const specInputToSourceUrl = (spec: OpenApiSpecInput): string | undefined =>
   spec.kind === "url" || spec.kind === "googleDiscovery" ? spec.url : undefined;
 
@@ -574,88 +401,6 @@ export const describeOpenApiIntegrationDisplay = (
   const config = decodeOpenApiIntegrationConfig(record.config);
   return { url: config?.baseUrl ?? config?.sourceUrl };
 };
-
-// ---------------------------------------------------------------------------
-// Spec text resolution — the stored config carries the spec's content hash
-// (`specHash` → blob `spec/<hash>`). Pre-blob rows that inlined the text are
-// rewritten by the spec-to-blob migrations before this code reads them.
-// ---------------------------------------------------------------------------
-
-const loadSpecText = (
-  storage: OpenapiStore,
-  config: OpenApiIntegrationConfig,
-): Effect.Effect<string | null, StorageFailure> =>
-  config.specHash != null ? storage.getSpec(config.specHash) : Effect.succeed(null);
-
-// ---------------------------------------------------------------------------
-// Spec → tool definitions (shared by addSpec, resolveTools, and detect)
-// ---------------------------------------------------------------------------
-
-interface CompiledSpec {
-  readonly definitions: readonly ToolDefinition[];
-  readonly hoistedDefs: Record<string, unknown>;
-  readonly title: string | undefined;
-  /** The spec's `info.description`. */
-  readonly description: string | undefined;
-}
-
-const compileSpec = (
-  specText: string,
-): Effect.Effect<CompiledSpec, OpenApiParseError | OpenApiExtractionError> =>
-  Effect.gen(function* () {
-    const doc = yield* parse(specText);
-    const result = yield* extract(doc);
-    const hoistedDefs: Record<string, unknown> = {};
-    if (doc.components?.schemas) {
-      for (const [k, v] of Object.entries(doc.components.schemas)) {
-        hoistedDefs[k] = normalizeOpenApiRefs(v);
-      }
-    }
-    return {
-      definitions: compileToolDefinitions(result.operations),
-      hoistedDefs,
-      title: Option.getOrUndefined(result.title),
-      description: Option.getOrUndefined(result.description),
-    };
-  });
-
-// A tool's name carries its structured `group.leaf` path verbatim (e.g.
-// `aliases.deleteAlias`). The address grammar
-// `tools.<integration>.<owner>.<connection>.<tool>` treats `<tool>` as the
-// trailing remainder (see parseToolAddress), so the dotted path needs no
-// flattening — it nests naturally as
-// `tools.<integration>.<owner>.<connection>.aliases.deleteAlias`, matching how
-// the sandbox `tools` proxy joins property access.
-
-const toolDefsFromCompiled = (compiled: CompiledSpec): readonly ToolDef[] =>
-  compiled.definitions.map(
-    (def): ToolDef => ({
-      name: ToolName.make(def.toolPath),
-      description: descriptionFor(def),
-      inputSchema: normalizeOpenApiRefs(Option.getOrUndefined(def.operation.inputSchema)),
-      // The output schema is the upstream response body only — transport
-      // status/headers live in the ToolResult `http` side channel, not the
-      // payload (see the invoke handler).
-      outputSchema: Option.match(def.operation.responseBody, {
-        onNone: () => normalizeOpenApiRefs(Option.getOrUndefined(def.operation.outputSchema)),
-        onSome: (responseBody) =>
-          Option.isSome(responseBody.fileHint)
-            ? ToolFileJsonSchema
-            : normalizeOpenApiRefs(Option.getOrUndefined(def.operation.outputSchema)),
-      }),
-      annotations: annotationsForOperation(def.operation.method, def.operation.pathTemplate),
-    }),
-  );
-
-const storedOperationsFromCompiled = (
-  integration: string,
-  compiled: CompiledSpec,
-): readonly StoredOperation[] =>
-  compiled.definitions.map((def) => ({
-    integration,
-    toolName: def.toolPath,
-    binding: toBinding(def),
-  }));
 
 // ---------------------------------------------------------------------------
 // Plugin factory
@@ -752,7 +497,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
           // Resolve URL → text and parse BEFORE opening a transaction. Holding
           // `BEGIN` across a network fetch is the Hyperdrive deadlock path.
           const resolved = yield* resolveSpecForInput(config.spec, httpClientLayer);
-          const compiled = yield* compileSpec(resolved.specText);
+          const compiled = yield* compileOpenApiSpec(resolved.specText);
 
           // Defaults the add page derives from its preview, applied here so
           // headless callers (MCP, API) get the same integration the UI's
@@ -846,7 +591,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
               });
               yield* ctx.storage.putOperations(
                 config.slug,
-                storedOperationsFromCompiled(config.slug, compiled),
+                openApiStoredOperationsFromCompiled(config.slug, compiled),
               );
             }),
           );
@@ -890,7 +635,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
           // Resolve + compile BEFORE the transaction (same Hyperdrive-deadlock
           // rule as addSpec: never hold BEGIN across a network fetch).
           const resolved = yield* resolveSpecForInput(specInput, httpClientLayer);
-          const compiled = yield* compileSpec(resolved.specText);
+          const compiled = yield* compileOpenApiSpec(resolved.specText);
 
           const previousOperations = yield* ctx.storage.listOperations(rawSlug);
           const previousNames = new Set(previousOperations.map((op) => op.toolName));
@@ -921,7 +666,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
               });
               yield* ctx.storage.putOperations(
                 rawSlug,
-                storedOperationsFromCompiled(rawSlug, compiled),
+                openApiStoredOperationsFromCompiled(rawSlug, compiled),
               );
             }),
           );
@@ -976,7 +721,7 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
                   Effect.map((conversion) => conversion.specText),
                 )
               : yield* resolveSpecText(previewInput.spec).pipe(Effect.provide(httpClientLayer));
-            return yield* previewSpec(specText).pipe(Effect.provide(httpClientLayer));
+            return yield* previewSpecText(specText);
           }),
 
         addSpec,
@@ -1133,173 +878,24 @@ export const openApiPlugin = definePlugin((options?: OpenApiPluginOptions) => {
     // operation bindings invokeTool needs are persisted at addSpec time; this
     // hook only shapes the per-connection ToolDefs from the spec blob the
     // catalog config points at.
-    resolveTools: ({
-      config,
-      storage,
-    }: {
-      readonly integration: Integration;
-      readonly config: IntegrationConfig;
-      readonly storage: OpenapiStore;
-    }): Effect.Effect<ResolveToolsResult, StorageFailure> =>
-      Effect.gen(function* () {
-        const openApiConfig = decodeOpenApiIntegrationConfig(config);
-        if (!openApiConfig) return { tools: [], definitions: {} };
-        const specText = yield* loadSpecText(storage, openApiConfig);
-        if (specText == null) return { tools: [], definitions: {} };
-        const compiled = yield* compileSpec(specText).pipe(
-          Effect.catch(() => Effect.succeed(null)),
-        );
-        if (!compiled) return { tools: [], definitions: {} };
-        return {
-          tools: toolDefsFromCompiled(compiled),
-          definitions: compiled.hoistedDefs,
-        };
-      }),
+    resolveTools: ({ config, storage }) => resolveOpenApiBackedTools({ config, storage }),
 
-    invokeTool: ({
-      ctx: invokeCtx,
-      toolRow,
-      credential,
-      args,
-    }: {
-      readonly ctx: PluginCtx<OpenapiStore>;
-      readonly toolRow: { readonly integration: string; readonly name: string };
-      readonly credential: ToolInvocationCredential;
-      readonly args: unknown;
-    }) =>
-      Effect.gen(function* () {
-        const httpClientLayer = options?.httpClientLayer ?? invokeCtx.httpClientLayer;
-        const integration = toolRow.integration;
-        const config = decodeOpenApiIntegrationConfig(credential.config);
+    invokeTool: ({ ctx: invokeCtx, toolRow, credential, args }) => {
+      const httpClientLayer = options?.httpClientLayer ?? invokeCtx.httpClientLayer;
+      return invokeOpenApiBackedTool({
+        ctx: invokeCtx,
+        toolRow,
+        credential,
+        args,
+        httpClientLayer,
+      });
+    },
 
-        // Resolve the operation binding from the plugin store; fall back to
-        // re-deriving it from the spec blob when the store has no row (e.g. an
-        // integration registered without going through addSpec). The fallback
-        // is the ONLY invoke-path spec read — the hot path never loads it.
-        const bindingFromSpec = config
-          ? Effect.gen(function* () {
-              const specText = yield* loadSpecText(invokeCtx.storage, config).pipe(
-                Effect.catch(() => Effect.succeed(null)),
-              );
-              const compiled =
-                specText == null
-                  ? null
-                  : yield* compileSpec(specText).pipe(Effect.catch(() => Effect.succeed(null)));
-              return compiled
-                ? storedOperationsFromCompiled(integration, compiled).find(
-                    (op) => op.toolName === toolRow.name,
-                  )?.binding
-                : undefined;
-            })
-          : Effect.succeed(undefined);
-
-        let binding = (yield* invokeCtx.storage.getOperation(integration, toolRow.name))?.binding;
-        if ((!binding || Option.isNone(binding.responseBody)) && config) {
-          binding = (yield* bindingFromSpec) ?? binding;
-        }
-        if (!binding) {
-          return yield* new OpenApiExtractionError({
-            message: `No OpenAPI operation found for tool "${toolRow.name}" on "${integration}"`,
-          });
-        }
-
-        const headers: Record<string, string> = { ...(config?.headers ?? {}) };
-        const queryParams: Record<string, string> = {
-          ...(config?.queryParams ?? {}),
-        };
-
-        // Apply the auth template (D11): render the connection's resolved inputs
-        // into the matching template's header/query slots (apiKey) or as a bearer
-        // Authorization header (oauth). A method with two distinct inputs (e.g.
-        // Datadog) renders each from its own value.
-        const template = (config?.authenticationTemplate ?? []).find(
-          (entry) => String(entry.slug) === String(credential.template),
-        );
-        if (template) {
-          // Fail if ANY input the template requires is unresolved — not just the
-          // primary `token` (a Datadog connection has no `token`, only its keys).
-          const missing = requiredTemplateVariables(template).filter((name) => {
-            const value = credential.values[name];
-            return value == null || value === "";
-          });
-          if (missing.length > 0) {
-            return openApiAuthToolFailure({
-              code:
-                template.kind === "oauth2"
-                  ? "oauth_connection_missing"
-                  : "connection_value_missing",
-              message: `Connection "${credential.connection}" for "${integration}" has no resolvable credential value. Re-authenticate or update the connection.`,
-              owner: credential.owner,
-              integration,
-              connection: String(credential.connection),
-              credentialKind: template.kind === "oauth2" ? "oauth" : "secret",
-            });
-          }
-          const rendered = renderAuthTemplate(template, credential.values);
-          Object.assign(headers, rendered.headers);
-          Object.assign(queryParams, rendered.queryParams);
-        }
-
-        const result = yield* invokeWithLayer(
-          binding,
-          (args ?? {}) as Record<string, unknown>,
-          config?.baseUrl ?? "",
-          headers,
-          queryParams,
-          httpClientLayer,
-        );
-
-        const ok = result.status >= 200 && result.status < 300;
-        if (!ok) {
-          if (result.status === 401 || result.status === 403) {
-            return openApiAuthToolFailure({
-              code: "connection_rejected",
-              status: result.status,
-              message: `Upstream rejected credentials for "${integration}" with HTTP ${result.status}. Re-authenticate or update the connection "${credential.connection}" before retrying this tool.`,
-              owner: credential.owner,
-              integration,
-              connection: String(credential.connection),
-              credentialKind: "upstream",
-              credentialLabel: "Upstream authorization",
-              details: result.error,
-            });
-          }
-          return ToolResult.fail({
-            code: "upstream_http_error",
-            status: result.status,
-            message: extractUpstreamMessage(result.error, result.status),
-            details: result.error,
-          });
-        }
-        // Payload-first: `data` is the upstream response body (matching the
-        // graphql/mcp plugins); transport facts ride in the `http` side
-        // channel so pagination/rate-limit headers stay reachable.
-        return ToolResult.ok(result.data, {
-          http: { status: result.status, headers: result.headers },
-        });
-      }),
-
-    resolveAnnotations: ({
-      ctx: annotationsCtx,
-      integration,
-      toolRows,
-    }: {
-      readonly ctx: PluginCtx<OpenapiStore>;
-      readonly integration: string;
-      readonly toolRows: readonly { readonly name: string }[];
-    }) =>
-      Effect.gen(function* () {
-        const ops = yield* annotationsCtx.storage.listOperations(String(integration));
-        const byName = new Map<string, OperationBinding>();
-        for (const op of ops) byName.set(op.toolName, op.binding);
-        const out: Record<string, ReturnType<typeof annotationsForOperation>> = {};
-        for (const row of toolRows) {
-          const binding = byName.get(row.name);
-          if (binding) {
-            out[row.name] = annotationsForOperation(binding.method, binding.pathTemplate);
-          }
-        }
-        return out;
+    resolveAnnotations: ({ ctx: annotationsCtx, integration, toolRows }) =>
+      resolveOpenApiBackedAnnotations({
+        ctx: annotationsCtx,
+        integration: String(integration),
+        toolRows,
       }),
 
     removeConnection: () => Effect.void,
