@@ -41,7 +41,7 @@ import {
   type Executor,
   type StorageFailure,
 } from "@executor-js/sdk";
-import { makeHostedHttpClientLayer } from "@executor-js/sdk/host-internal";
+import { makeHostedFetch, makeHostedHttpClientLayer } from "@executor-js/sdk/host-internal";
 
 import { DbProvider } from "./executor-fuma-db";
 
@@ -241,9 +241,11 @@ export const makeScopedExecutor = <
     });
 
     const plugins = pluginsFactory();
-    const httpClientLayer = makeHostedHttpClientLayer({
+    const hostedHttpOptions = {
       allowLocalNetwork: config.allowLocalNetwork,
-    });
+    };
+    const httpClientLayer = makeHostedHttpClientLayer(hostedHttpOptions);
+    const hostedFetch = makeHostedFetch(hostedHttpOptions);
 
     // The org id is the tenant (catalog partition); the account id is the acting
     // subject (drives `owner: "user"` rows). `organizationName` is no longer part
@@ -255,6 +257,7 @@ export const makeScopedExecutor = <
       blobs,
       plugins,
       httpClientLayer,
+      fetch: hostedFetch,
       onElicitation: "accept-all",
       redirectUri,
       coreTools: {

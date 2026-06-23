@@ -37,6 +37,7 @@ import {
   buildMicrosoftGraphOpenApiSpec,
   decodeMicrosoftGraphIntegrationConfig,
   microsoftGraphKeepPathItem,
+  type MicrosoftGraphUrlPolicy,
   type MicrosoftGraphIntegrationConfig,
   type MicrosoftGraphSpecBuild,
 } from "./graph";
@@ -83,6 +84,7 @@ export interface MicrosoftUpdateResult {
 
 export interface MicrosoftPluginOptions {
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient, never, never>;
+  readonly allowUnsafeUrlOverrides?: boolean;
 }
 
 const DEFAULT_MICROSOFT_SLUG = "microsoft_graph";
@@ -124,6 +126,7 @@ const describeMicrosoftIntegrationDisplay = (
 const makeMicrosoftPluginExtension = (
   ctx: PluginCtx<OpenapiStore>,
   httpClientLayer: Layer.Layer<HttpClient.HttpClient, never, never>,
+  urlPolicy?: MicrosoftGraphUrlPolicy,
 ) => {
   const persistGraphOperations = (
     graph: MicrosoftGraphSpecBuild,
@@ -145,7 +148,7 @@ const makeMicrosoftPluginExtension = (
 
   const addGraph = (config: MicrosoftGraphConfig) =>
     Effect.gen(function* () {
-      const graph = yield* buildMicrosoftGraphOpenApiSpec(config, httpClientLayer);
+      const graph = yield* buildMicrosoftGraphOpenApiSpec(config, httpClientLayer, urlPolicy);
       const slug = IntegrationSlug.make(config.slug?.trim() || DEFAULT_MICROSOFT_SLUG);
 
       const existing = yield* ctx.core.integrations.get(slug);
@@ -212,6 +215,7 @@ const makeMicrosoftPluginExtension = (
             input?.clientCredentialsTokenUrl ?? current.microsoftGraphClientCredentialsTokenUrl,
         },
         httpClientLayer,
+        urlPolicy,
       );
       const previousOperations = yield* ctx.storage.listOperations(rawSlug);
       const previousNames = new Set(previousOperations.map((op) => op.toolName));
@@ -341,7 +345,9 @@ export const microsoftPlugin = definePlugin((options?: MicrosoftPluginOptions) =
   storage: (deps): OpenapiStore => makeDefaultOpenapiStore(deps),
 
   extension: (ctx) =>
-    makeMicrosoftPluginExtension(ctx, options?.httpClientLayer ?? ctx.httpClientLayer),
+    makeMicrosoftPluginExtension(ctx, options?.httpClientLayer ?? ctx.httpClientLayer, {
+      allowUnsafeUrlOverrides: options?.allowUnsafeUrlOverrides === true,
+    }),
 
   describeAuthMethods: describeMicrosoftAuthMethods,
   describeIntegrationDisplay: describeMicrosoftIntegrationDisplay,

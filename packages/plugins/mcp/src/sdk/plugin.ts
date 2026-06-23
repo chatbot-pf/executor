@@ -469,6 +469,7 @@ const buildConnectorInput = (
   values: Record<string, string | null>,
   templateSlug: string | null,
   allowStdio: boolean,
+  httpClientLayer?: Layer.Layer<HttpClient.HttpClient>,
 ): Effect.Effect<ConnectorInput, McpConnectionError> => {
   if (config.transport === "stdio") {
     if (!allowStdio) {
@@ -512,6 +513,7 @@ const buildConnectorInput = (
     queryParams: Object.keys(queryParams).length > 0 ? queryParams : undefined,
     headers: Object.keys(headers).length > 0 ? headers : undefined,
     authProvider,
+    httpClientLayer,
   });
 };
 
@@ -636,6 +638,7 @@ export const mcpPlugin = definePlugin((options?: McpPluginOptions) => {
             endpoint: trimmed,
             headers: probeHeaders,
             queryParams: probeQueryParams,
+            httpClientLayer,
           });
 
           const result = yield* discoverTools(connector).pipe(
@@ -929,7 +932,7 @@ export const mcpPlugin = definePlugin((options?: McpPluginOptions) => {
     // Discovery failures (auth not ready, server down) yield an empty tool set
     // rather than failing — the connection still lands and can be refreshed.
     // -----------------------------------------------------------------------
-    resolveTools: ({ config, connection, template, getValues }) =>
+    resolveTools: ({ config, connection, template, getValues, httpClientLayer }) =>
       Effect.gen(function* () {
         const parsed = parseMcpIntegrationConfig(config);
         if (!parsed) return { tools: [] as readonly ToolDef[] };
@@ -945,6 +948,7 @@ export const mcpPlugin = definePlugin((options?: McpPluginOptions) => {
           values,
           template === null ? null : String(template),
           allowStdio,
+          httpClientLayer,
         ).pipe(
           Effect.map((ci) => createMcpConnector(ci)),
           Effect.result,
@@ -968,7 +972,7 @@ export const mcpPlugin = definePlugin((options?: McpPluginOptions) => {
         }),
       ) as Effect.Effect<{ readonly tools: readonly ToolDef[] }, StorageFailure>,
 
-    invokeTool: ({ toolRow, credential, args, elicit }) =>
+    invokeTool: ({ ctx, toolRow, credential, args, elicit }) =>
       Effect.gen(function* () {
         const parsed = parseMcpIntegrationConfig(credential.config);
         if (!parsed) {
@@ -1013,6 +1017,7 @@ export const mcpPlugin = definePlugin((options?: McpPluginOptions) => {
           credential.values,
           String(credential.template),
           allowStdio,
+          options?.httpClientLayer ?? ctx.httpClientLayer,
         ).pipe(Effect.map((ci) => createMcpConnector(ci)));
 
         const raw = yield* invokeMcpTool({
@@ -1087,7 +1092,11 @@ export const mcpPlugin = definePlugin((options?: McpPluginOptions) => {
         const name = parsed.value.hostname || "mcp";
         const slug = deriveMcpNamespace({ endpoint: trimmed });
 
-        const connector = createMcpConnector({ transport: "remote", endpoint: trimmed });
+        const connector = createMcpConnector({
+          transport: "remote",
+          endpoint: trimmed,
+          httpClientLayer,
+        });
 
         const connected = yield* discoverTools(connector).pipe(
           Effect.map(() => true),

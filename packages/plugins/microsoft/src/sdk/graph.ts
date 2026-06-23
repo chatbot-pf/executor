@@ -61,6 +61,10 @@ export interface MicrosoftGraphSpecBuild {
   readonly authenticationTemplate: readonly Authentication[];
 }
 
+export interface MicrosoftGraphUrlPolicy {
+  readonly allowUnsafeUrlOverrides?: boolean;
+}
+
 export type MicrosoftGraphIntegrationConfig = OpenApiIntegrationConfig & {
   readonly microsoftGraphPresetIds?: readonly string[];
   readonly microsoftGraphCustomScopes?: readonly string[];
@@ -179,6 +183,154 @@ const BASE_OAUTH_SCOPES = new Set(["offline_access", "openid", "profile", "email
 
 const firstString = (values: readonly unknown[]): string | undefined =>
   values.find((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+const parseTrustedHttpsUrl = (value: string): URL | null => {
+  if (!URL.canParse(value)) return null;
+  const parsed = new URL(value);
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.hash) {
+    return null;
+  }
+  return parsed;
+};
+
+const allowUnsafeUrl = (
+  value: string | undefined,
+  policy: MicrosoftGraphUrlPolicy | undefined,
+): string | undefined | null => {
+  if (!value) return undefined;
+  if (policy?.allowUnsafeUrlOverrides !== true) return null;
+  return parseTrustedHttpsUrl(value) ? value : null;
+};
+
+const normalizeMicrosoftGraphSpecUrl = (
+  value: string,
+  policy?: MicrosoftGraphUrlPolicy,
+): string | null => {
+  if (value === MICROSOFT_GRAPH_OPENAPI_URL) return value;
+  return allowUnsafeUrl(value, policy) ?? null;
+};
+
+const MICROSOFT_GRAPH_HOSTS = new Set([
+  "graph.microsoft.com",
+  "graph.microsoft.us",
+  "dod-graph.microsoft.us",
+  "microsoftgraph.chinacloudapi.cn",
+]);
+
+const normalizeMicrosoftGraphBaseUrl = (
+  value: string | undefined,
+  policy?: MicrosoftGraphUrlPolicy,
+): string | undefined | null => {
+  const unsafe = allowUnsafeUrl(value, policy);
+  if (unsafe !== null) return unsafe;
+  if (!value) return undefined;
+  const parsed = parseTrustedHttpsUrl(value);
+  if (!parsed || !MICROSOFT_GRAPH_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+  if (!/^\/(?:v1\.0|beta)(?:\/)?$/.test(parsed.pathname)) return null;
+  if (parsed.search) return null;
+  return parsed.toString().replace(/\/$/, "");
+};
+
+const MICROSOFT_IDENTITY_HOSTS = new Set([
+  "login.microsoftonline.com",
+  "login.microsoftonline.us",
+  "login.partner.microsoftonline.cn",
+]);
+
+const normalizeMicrosoftOAuthEndpointUrl = (
+  value: string,
+  endpoint: "authorize" | "token",
+  policy?: MicrosoftGraphUrlPolicy,
+): string | null => {
+  const unsafe = allowUnsafeUrl(value, policy);
+  if (unsafe !== null) return unsafe ?? null;
+  const parsed = parseTrustedHttpsUrl(value);
+  if (!parsed || !MICROSOFT_IDENTITY_HOSTS.has(parsed.hostname.toLowerCase())) return null;
+  if (parsed.search) return null;
+  const suffix = endpoint === "authorize" ? "authorize" : "token";
+  return /^\/[^/]+\/oauth2\/v2\.0\/(?:authorize|token)$/.test(parsed.pathname) &&
+    parsed.pathname.endsWith(`/${suffix}`)
+    ? parsed.toString()
+    : null;
+};
+
+const validateSelectionUrls = (
+  selection: ReturnType<typeof normalizeSelection>,
+  policy?: MicrosoftGraphUrlPolicy,
+): Effect.Effect<ReturnType<typeof normalizeSelection>, OpenApiParseError> =>
+  Effect.gen(function* () {
+    const specUrl = normalizeMicrosoftGraphSpecUrl(selection.specUrl, policy);
+    if (!specUrl) {
+      return yield* new OpenApiParseError({
+        message: "Microsoft Graph specUrl must point to the trusted Microsoft Graph OpenAPI source",
+      });
+    }
+    const baseUrl = normalizeMicrosoftGraphBaseUrl(selection.baseUrl, policy);
+    if (baseUrl === null) {
+      return yield* new OpenApiParseError({
+        message: "Microsoft Graph baseUrl must point to a supported Microsoft Graph endpoint",
+      });
+    }
+    const authorizationUrl = selection.authorizationUrl
+      ? normalizeMicrosoftOAuthEndpointUrl(selection.authorizationUrl, "authorize", policy)
+      : undefined;
+    if (selection.authorizationUrl && !authorizationUrl) {
+      return yield* new OpenApiParseError({
+        message: "Microsoft authorizationUrl must point to a supported Microsoft identity endpoint",
+      });
+    }
+    const tokenUrl = selection.tokenUrl
+      ? normalizeMicrosoftOAuthEndpointUrl(selection.tokenUrl, "token", policy)
+      : undefined;
+    if (selection.tokenUrl && !tokenUrl) {
+      return yield* new OpenApiParseError({
+        message: "Microsoft tokenUrl must point to a supported Microsoft identity endpoint",
+      });
+    }
+    const clientCredentialsTokenUrl = selection.clientCredentialsTokenUrl
+      ? normalizeMicrosoftOAuthEndpointUrl(selection.clientCredentialsTokenUrl, "token", policy)
+      : undefined;
+    if (selection.clientCredentialsTokenUrl && !clientCredentialsTokenUrl) {
+      return yield* new OpenApiParseError({
+        message:
+          "Microsoft clientCredentialsTokenUrl must point to a supported Microsoft identity endpoint",
+      });
+    }
+    return {
+      ...selection,
+      specUrl,
+      ...(baseUrl ? { baseUrl } : { baseUrl: undefined }),
+      ...(authorizationUrl ? { authorizationUrl } : { authorizationUrl: undefined }),
+      ...(tokenUrl ? { tokenUrl } : { tokenUrl: undefined }),
+      ...(clientCredentialsTokenUrl
+        ? { clientCredentialsTokenUrl }
+        : { clientCredentialsTokenUrl: undefined }),
+    };
+  });
+
+const validateResolvedOAuthEndpoints = (
+  endpoints: MicrosoftOAuthEndpoints,
+  policy?: MicrosoftGraphUrlPolicy,
+): Effect.Effect<MicrosoftOAuthEndpoints, OpenApiParseError> =>
+  Effect.gen(function* () {
+    const authorizationUrl = normalizeMicrosoftOAuthEndpointUrl(
+      endpoints.authorizationUrl,
+      "authorize",
+      policy,
+    );
+    const tokenUrl = normalizeMicrosoftOAuthEndpointUrl(endpoints.tokenUrl, "token", policy);
+    const clientCredentialsTokenUrl = normalizeMicrosoftOAuthEndpointUrl(
+      endpoints.clientCredentialsTokenUrl,
+      "token",
+      policy,
+    );
+    if (!authorizationUrl || !tokenUrl || !clientCredentialsTokenUrl) {
+      return yield* new OpenApiParseError({
+        message: "Microsoft OAuth endpoints must point to supported Microsoft identity endpoints",
+      });
+    }
+    return { authorizationUrl, tokenUrl, clientCredentialsTokenUrl };
+  });
 
 const recordValues = (value: unknown): readonly unknown[] =>
   isRecord(value) ? Object.values(value) : [];
@@ -490,9 +642,10 @@ const streamSelectedScopes = (
 export const buildMicrosoftGraphOpenApiSpec = (
   input: MicrosoftGraphSelectionInput,
   httpClientLayer: Layer.Layer<HttpClient.HttpClient, never, never>,
+  urlPolicy?: MicrosoftGraphUrlPolicy,
 ): Effect.Effect<MicrosoftGraphSpecBuild, OpenApiParseError> =>
   Effect.gen(function* () {
-    const selection = normalizeSelection(input);
+    const selection = yield* validateSelectionUrls(normalizeSelection(input), urlPolicy);
     const sourceText = yield* fetchMicrosoftGraphOpenApiSpec(selection.specUrl).pipe(
       Effect.provide(httpClientLayer),
     );
@@ -512,7 +665,10 @@ export const buildMicrosoftGraphOpenApiSpec = (
     // Head + small components (servers + securitySchemes) parse cheaply and
     // carry everything `resolveOAuthEndpoints` needs.
     const headDoc = { ...parseHead(structure), components: parseSmallComponents(structure) };
-    const endpoints = resolveOAuthEndpoints(headDoc, selection);
+    const endpoints = yield* validateResolvedOAuthEndpoints(
+      resolveOAuthEndpoints(headDoc, selection),
+      urlPolicy,
+    );
 
     const permissionsReference =
       selection.coversFullGraph === true

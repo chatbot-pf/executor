@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Option, Predicate, Schema } from "effect";
-import { HttpServerResponse } from "effect/unstable/http";
+import { Effect, Layer, Option, Predicate, Schema } from "effect";
+import {
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+  HttpServerResponse,
+} from "effect/unstable/http";
 
 import {
   AuthTemplateSlug,
@@ -17,6 +22,7 @@ import {
   serveTestHttpApp,
 } from "@executor-js/sdk/testing";
 
+import { createMcpConnector } from "./connection";
 import { mcpPlugin, userFacingProbeMessage } from "./plugin";
 import { McpInvocationError } from "./errors";
 import { extractManifestFromListToolsResult, deriveMcpNamespace, joinToolPath } from "./manifest";
@@ -296,6 +302,30 @@ describe("mcpPlugin", () => {
       expect(executor.mcp.probeEndpoint).toBeTypeOf("function");
       expect(executor.oauth.start).toBeTypeOf("function");
       expect(executor.oauth.complete).toBeTypeOf("function");
+    }),
+  );
+
+  it.effect("routes remote connector traffic through the provided HttpClient layer", () =>
+    Effect.gen(function* () {
+      const seen: string[] = [];
+      const httpClientLayer = Layer.succeed(HttpClient.HttpClient)(
+        HttpClient.make((request: HttpClientRequest.HttpClientRequest) => {
+          seen.push(request.url);
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, new Response("blocked", { status: 403 })),
+          );
+        }),
+      );
+
+      const error = yield* createMcpConnector({
+        transport: "remote",
+        endpoint: "https://internal.example/mcp",
+        remoteTransport: "streamable-http",
+        httpClientLayer,
+      }).pipe(Effect.flip);
+
+      expect(Predicate.isTagged(error, "McpConnectionError")).toBe(true);
+      expect(seen).toEqual(["https://internal.example/mcp"]);
     }),
   );
 

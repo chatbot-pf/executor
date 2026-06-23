@@ -1,6 +1,6 @@
 import { Effect, Match, Option, Schema } from "effect";
 import type { Layer } from "effect";
-import { FetchHttpClient, HttpClient } from "effect/unstable/http";
+import { HttpClient } from "effect/unstable/http";
 
 import {
   authToolFailure,
@@ -893,11 +893,13 @@ export const graphqlPlugin = definePlugin((options?: GraphqlPluginOptions) => {
       template,
       storage,
       getValues,
+      httpClientLayer,
     }: {
       readonly config: IntegrationConfig;
       readonly template: AuthTemplateSlug | null;
       readonly storage: GraphqlStore;
       readonly getValues: () => Effect.Effect<Record<string, string | null>, unknown>;
+      readonly httpClientLayer: Layer.Layer<HttpClient.HttpClient>;
     }) =>
       Effect.gen(function* () {
         const decoded = yield* decodeGraphqlIntegrationConfig(config).pipe(Effect.option);
@@ -917,7 +919,7 @@ export const graphqlPlugin = definePlugin((options?: GraphqlPluginOptions) => {
           introspectionJson,
           values,
           template,
-          options?.httpClientLayer ?? httpClientLayerFallback,
+          options?.httpClientLayer ?? httpClientLayer,
         ).pipe(Effect.option);
         if (Option.isNone(introspection)) return { tools: [] };
         const extracted = yield* extract(introspection.value).pipe(Effect.option);
@@ -1117,9 +1119,3 @@ export const graphqlPlugin = definePlugin((options?: GraphqlPluginOptions) => {
   // HTTP transport (routes/handlers/extensionService) is layered on by the
   // api-aware factory in `@executor-js/plugin-graphql/api`.
 });
-
-// The fallback HTTP layer for `resolveTools`. The hook input carries no `ctx`,
-// so when no explicit layer is passed to the plugin we use the same default the
-// executor wires into `ctx.httpClientLayer` (`FetchHttpClient.layer`). Hosts/
-// tests that need a custom transport pass `options.httpClientLayer`.
-const httpClientLayerFallback: Layer.Layer<HttpClient.HttpClient> = FetchHttpClient.layer;

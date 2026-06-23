@@ -246,6 +246,10 @@ const guardFetch = (
     return await underlying(current, { ...currentInit, redirect: "manual" });
   }) as typeof globalThis.fetch;
 
+export const makeHostedFetch = (options: HostedHttpClientOptions = {}): typeof globalThis.fetch =>
+  // oxlint-disable-next-line executor/no-raw-fetch -- boundary: exposes a guarded Fetch API adapter for libraries that require fetch
+  guardFetch(options.fetch ?? globalThis.fetch, options);
+
 export const makeHostedHttpClientLayer = (
   options: HostedHttpClientOptions = {},
 ): Layer.Layer<HttpClient.HttpClient> =>

@@ -358,6 +358,11 @@ export interface ExecutorConfig<TPlugins extends readonly AnyPlugin[] = readonly
   readonly onElicitation: OnElicitation;
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>;
   /**
+   * Fetch API implementation for dependencies that cannot consume `httpClientLayer`.
+   * Prefer `httpClientLayer` for normal SDK and plugin HTTP.
+   */
+  readonly fetch?: typeof globalThis.fetch;
+  /**
    * The OAuth callback URL (`${webBaseUrl}/oauth/callback`) the host serves and
    * sends to providers. There is NO localhost default: omit it (or pass
    * undefined) only for executors that never run interactive OAuth — the
@@ -1455,6 +1460,7 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
                 scopes: grantedScopes,
                 resource: clientRow.resource ? String(clientRow.resource) : undefined,
                 endpointUrlPolicy: config.oauthEndpointUrlPolicy,
+                fetch: config.fetch,
               }).pipe(
                 // A client_credentials failure is never a rotated-refresh-token
                 // problem, so do NOT map invalid_grant → reauth. Surface as a
@@ -1487,6 +1493,7 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
                   // (MCP servers require this on refresh).
                   resource: clientRow.resource ? String(clientRow.resource) : undefined,
                   endpointUrlPolicy: config.oauthEndpointUrlPolicy,
+                  fetch: config.fetch,
                 }).pipe(
                   Effect.mapError((cause) =>
                     cause.error === "invalid_grant"
@@ -1913,6 +1920,7 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
           .resolveTools({
             integration: rowToIntegration(integrationRow),
             config: decodeJsonColumn(integrationRow.config),
+            httpClientLayer: runtime.ctx.httpClientLayer,
             connection: ref,
             template: existingRow ? AuthTemplateSlug.make(existingRow.template) : null,
             storage: runtime.storage,
@@ -3079,6 +3087,7 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
           }),
         ),
       httpClientLayer: config.httpClientLayer,
+      fetch: config.fetch,
       endpointUrlPolicy: config.oauthEndpointUrlPolicy,
       // EXPLICIT — no localhost default. When a caller omits `redirectUri` the
       // OAuth service receives `null` and redirect-requiring flows fail loudly

@@ -132,6 +132,7 @@ export interface OAuthServiceDeps {
     template: AuthTemplateSlug,
   ) => Effect.Effect<readonly string[], StorageFailure>;
   readonly httpClientLayer?: Layer.Layer<HttpClient.HttpClient>;
+  readonly fetch?: typeof globalThis.fetch;
   readonly endpointUrlPolicy?: OAuthEndpointUrlPolicy;
   /**
    * The OAuth callback URL (`${webBaseUrl}${mountPrefix}/oauth/callback`) the host
@@ -341,6 +342,7 @@ const validateClientEndpoints = (
 
 export const makeOAuthService = (deps: OAuthServiceDeps): OAuthService => {
   const httpClientLayer = deps.httpClientLayer ?? FetchHttpClient.layer;
+  const fetch = deps.fetch;
   // EXPLICIT — no localhost default. `null` means this executor has no OAuth
   // callback; redirect-requiring flows fail loudly via `requireRedirectUri`.
   const redirectUri = deps.redirectUri;
@@ -678,6 +680,7 @@ export const makeOAuthService = (deps: OAuthServiceDeps): OAuthService => {
           scopes: requestedScopes,
           resource: client.resource ?? undefined,
           endpointUrlPolicy: deps.endpointUrlPolicy,
+          fetch,
         }).pipe(
           Effect.mapError(
             (cause) =>
@@ -854,6 +857,7 @@ export const makeOAuthService = (deps: OAuthServiceDeps): OAuthService => {
         code: input.code,
         resource: client.resource ?? undefined,
         endpointUrlPolicy: deps.endpointUrlPolicy,
+        fetch,
       }).pipe(
         Effect.mapError(
           (cause) =>

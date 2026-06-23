@@ -161,6 +161,7 @@ describe("OpenAPI plugin — spec blob storage", () => {
           },
           template: null,
           storage,
+          httpClientLayer: FetchHttpClient.layer,
           getValue: () => Effect.succeed(null),
           getValues: () => Effect.succeed({}),
         });

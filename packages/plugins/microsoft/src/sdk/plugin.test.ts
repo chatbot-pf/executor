@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Effect, Layer } from "effect";
+import { Effect, Exit, Layer } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
 import {
@@ -10,7 +10,7 @@ import {
 } from "@executor-js/sdk";
 import { makeTestConfig, memoryCredentialsPlugin } from "@executor-js/sdk/testing";
 
-import { microsoftPlugin } from "./plugin";
+import { microsoftPlugin, type MicrosoftPluginOptions } from "./plugin";
 import {
   MICROSOFT_AUTH_TEMPLATE_SLUG,
   MICROSOFT_CLIENT_CREDENTIALS_AUTH_TEMPLATE_SLUG,
@@ -191,10 +191,54 @@ const graphHttpClientLayer = Layer.succeed(HttpClient.HttpClient)(
   ),
 );
 
-const graphPlugins = () =>
-  [microsoftPlugin({ httpClientLayer: graphHttpClientLayer }), memoryCredentialsPlugin()] as const;
+const graphPlugins = (options?: Omit<MicrosoftPluginOptions, "httpClientLayer">) =>
+  [
+    microsoftPlugin({ httpClientLayer: graphHttpClientLayer, ...options }),
+    memoryCredentialsPlugin(),
+  ] as const;
 
 describe("Microsoft Graph provider", () => {
+  it.effect("rejects non-Microsoft URL overrides before fetching the Graph spec", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let requests = 0;
+        const blockedHttpClientLayer = Layer.succeed(HttpClient.HttpClient)(
+          HttpClient.make((request: HttpClientRequest.HttpClientRequest) =>
+            Effect.sync(() => {
+              requests += 1;
+              return HttpClientResponse.fromWeb(
+                request,
+                new Response("unexpected request", { status: 500 }),
+              );
+            }),
+          ),
+        );
+        const executor = yield* createExecutor(
+          makeTestConfig({
+            plugins: [
+              microsoftPlugin({ httpClientLayer: blockedHttpClientLayer }),
+              memoryCredentialsPlugin(),
+            ],
+          }),
+        );
+
+        const exit = yield* executor.microsoft
+          .addGraph({
+            slug: "bad_graph",
+            baseUrl: "https://attacker.example/v1.0",
+            specUrl: "https://attacker.example/openapi.yaml",
+            authorizationUrl: "https://attacker.example/oauth2/v2.0/authorize",
+            tokenUrl: "https://attacker.example/oauth2/v2.0/token",
+            clientCredentialsTokenUrl: "https://attacker.example/oauth2/v2.0/token",
+          })
+          .pipe(Effect.exit);
+
+        expect(Exit.isFailure(exit)).toBe(true);
+        expect(requests).toBe(0);
+      }),
+    ),
+  );
+
   it.effect("adds a selected Graph workload source with one OAuth template", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -414,7 +458,9 @@ describe("Microsoft Graph provider", () => {
   it.effect("adds Microsoft Graph from the emulator spec with app-only OAuth endpoints", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const executor = yield* createExecutor(makeTestConfig({ plugins: graphPlugins() }));
+        const executor = yield* createExecutor(
+          makeTestConfig({ plugins: graphPlugins({ allowUnsafeUrlOverrides: true }) }),
+        );
 
         yield* executor.microsoft.addGraph({
           presetIds: ["users"],

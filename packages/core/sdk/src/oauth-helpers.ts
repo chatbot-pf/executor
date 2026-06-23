@@ -417,10 +417,14 @@ const oauth4webapiRequestOptions = (
   targetUrl: string,
   timeoutMs: number | undefined,
   endpointUrlPolicy: OAuthEndpointUrlPolicy = {},
+  customFetch?: typeof globalThis.fetch,
 ): Record<string, unknown> => {
   const options: Record<string, unknown> = {
     signal: AbortSignal.timeout(timeoutMs ?? OAUTH2_DEFAULT_TIMEOUT_MS),
   };
+  if (customFetch) {
+    (options as { [oauth.customFetch]?: typeof globalThis.fetch })[oauth.customFetch] = customFetch;
+  }
   if (
     isLoopbackHttpUrl(targetUrl) ||
     (URL.canParse(targetUrl) &&
@@ -510,6 +514,7 @@ export type ExchangeAuthorizationCodeInput = {
   readonly resource?: string;
   readonly timeoutMs?: number;
   readonly endpointUrlPolicy?: OAuthEndpointUrlPolicy;
+  readonly fetch?: typeof globalThis.fetch;
 };
 
 export const exchangeAuthorizationCode = (
@@ -545,7 +550,12 @@ export const exchangeAuthorizationCode = (
         clientAuth,
         "authorization_code",
         params,
-        oauth4webapiRequestOptions(input.tokenUrl, input.timeoutMs, input.endpointUrlPolicy),
+        oauth4webapiRequestOptions(
+          input.tokenUrl,
+          input.timeoutMs,
+          input.endpointUrlPolicy,
+          input.fetch,
+        ),
       );
       return await processTokenEndpointResponse(as, client, response);
     },
@@ -568,6 +578,7 @@ export type ExchangeClientCredentialsInput = {
   readonly resource?: string;
   readonly timeoutMs?: number;
   readonly endpointUrlPolicy?: OAuthEndpointUrlPolicy;
+  readonly fetch?: typeof globalThis.fetch;
 };
 
 export const exchangeClientCredentials = (
@@ -593,7 +604,12 @@ export const exchangeClientCredentials = (
         client,
         clientAuth,
         params,
-        oauth4webapiRequestOptions(input.tokenUrl, input.timeoutMs, input.endpointUrlPolicy),
+        oauth4webapiRequestOptions(
+          input.tokenUrl,
+          input.timeoutMs,
+          input.endpointUrlPolicy,
+          input.fetch,
+        ),
       );
       const result = await oauth.processClientCredentialsResponse(as, client, response);
       return tokenResponseFrom(result);
@@ -621,6 +637,7 @@ export type RefreshAccessTokenInput = {
   readonly resource?: string;
   readonly timeoutMs?: number;
   readonly endpointUrlPolicy?: OAuthEndpointUrlPolicy;
+  readonly fetch?: typeof globalThis.fetch;
 };
 
 export const refreshAccessToken = (
@@ -652,7 +669,12 @@ export const refreshAccessToken = (
         clientAuth,
         input.refreshToken,
         {
-          ...oauth4webapiRequestOptions(input.tokenUrl, input.timeoutMs, input.endpointUrlPolicy),
+          ...oauth4webapiRequestOptions(
+            input.tokenUrl,
+            input.timeoutMs,
+            input.endpointUrlPolicy,
+            input.fetch,
+          ),
           additionalParameters,
         },
       );

@@ -211,6 +211,7 @@ export interface ResolveToolsInput<TStore = unknown> {
    *  facades (e.g. a content-addressed spec blob) instead of inlining them
    *  in `config`. */
   readonly storage: TStore;
+  readonly httpClientLayer: Layer.Layer<HttpClient.HttpClient>;
   /** The connection whose tools are being resolved. */
   readonly connection: ConnectionRef;
   /** Which of the integration's declared auth methods the connection binds

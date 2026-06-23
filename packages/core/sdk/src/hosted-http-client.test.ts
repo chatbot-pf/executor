@@ -4,6 +4,7 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import {
   type HostedHostnameResolver,
+  makeHostedFetch,
   makeHostedHttpClientLayer,
   validateHostedOutboundUrl,
 } from "./hosted-http-client";
@@ -94,6 +95,22 @@ describe("hosted outbound HTTP client", () => {
       expect(calls).toBe(0);
     }),
   );
+
+  it("applies the DNS guard to fetch callers", async () => {
+    let calls = 0;
+    const hostedFetch = makeHostedFetch({
+      fetch: (async () => {
+        calls++;
+        return new Response("unexpected", { status: 200 });
+      }) as typeof globalThis.fetch,
+      resolveHostname: async () => [{ address: "10.0.0.20", family: 4 }],
+    });
+
+    await expect(hostedFetch("https://api.example/token")).rejects.toMatchObject({
+      _tag: "HostedOutboundRequestBlocked",
+    });
+    expect(calls).toBe(0);
+  });
 
   it.effect("checks redirected URLs before following them", () =>
     Effect.gen(function* () {
