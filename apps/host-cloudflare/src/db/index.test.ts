@@ -34,9 +34,25 @@ describe("isPostgresConfigured", () => {
   });
 
   it("is false when DATABASE_URL is set without the direct escape hatch", () => {
-    // A bare DATABASE_URL must NOT silently flip the seam to Postgres — the
+    // A bare DATABASE_URL must NOT silently flip the seam to Postgres; the
     // operator has to opt in explicitly (HYPERDRIVE binding, or the flag).
     expect(isPostgresConfigured(env({ DATABASE_URL: DIRECT }))).toBe(false);
+  });
+});
+
+describe("partial-misconfig guard (selectDbSeam / createExecutorDb fall back to D1)", () => {
+  // selectDbSeam and createExecutorDb both gate the Postgres branch on
+  // `isPostgresConfigured(env) && resolveConnectionString(env)`. The only state
+  // where the first is true but the second is empty is a HYPERDRIVE binding
+  // whose connectionString is empty: then the guard is falsy and the seam
+  // falls back to D1 (with a warning). Pin that combined contract here without
+  // booting a real D1 handle.
+  it("treats an empty-connectionString Hyperdrive binding as not-usable -> D1", () => {
+    const e = env({ HYPERDRIVE: fakeHyperdrive("") });
+    expect(isPostgresConfigured(e)).toBe(true);
+    expect(resolveConnectionString(e)).toBe("");
+    // The guard selectDbSeam/createExecutorDb apply:
+    expect(isPostgresConfigured(e) && resolveConnectionString(e) !== "").toBe(false);
   });
 });
 

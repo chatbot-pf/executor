@@ -10,7 +10,7 @@
 //   - a write/read round-trip works through the FumaDB orm
 //   - REAL interactive transactions work (the D1 `interactiveTransactions:
 //     false` workaround is gone): a committed tx persists both rows, a failed
-//     tx rolls BOTH back — atomicity D1 could not give.
+//     tx rolls BOTH back: atomicity D1 could not give.
 //
 // PGlite is in-process (no Docker / external DB), so this runs unconditionally.
 

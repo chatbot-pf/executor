@@ -14,12 +14,12 @@ import {
 } from "./postgres";
 
 // ---------------------------------------------------------------------------
-// DB seam selector. D1 (SQLite) is the default — the template's
+// DB seam selector. D1 (SQLite) is the default: the template's
 // zero-external-dependency single-Worker premise. The Postgres seam
 // (Neon via Hyperdrive, see ./postgres.ts) activates ONLY when the operator has
 // wired up credentials: a Hyperdrive binding, or a direct DATABASE_URL behind
-// EXECUTOR_DIRECT_DATABASE_URL=true. Presence of credentials IS the signal — no
-// separate provider flag — so doing nothing keeps D1.
+// EXECUTOR_DIRECT_DATABASE_URL=true. Presence of credentials IS the signal, no
+// separate provider flag, so doing nothing keeps D1.
 // ---------------------------------------------------------------------------
 
 export const isPostgresConfigured = (env: CloudflareEnv): boolean => {
@@ -48,7 +48,7 @@ export const createExecutorDb = async (env: CloudflareEnv): Promise<ExecutorDbHa
 
 // The HTTP db wiring, as a discriminated union the app composes into
 // ExecutorApp.make. Postgres carries a `requestScoped` connection layer (the
-// socket lives in the request fiber's scope — Cloudflare forbids sharing it
+// socket lives in the request fiber's scope; Cloudflare forbids sharing it
 // across requests); the DbProvider reads it with a no-op close. D1 has no
 // request scope (the binding is not a socket) and reuses one memoized handle.
 export type CloudflareDbSeam =

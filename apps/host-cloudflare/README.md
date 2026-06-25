@@ -79,12 +79,12 @@ environment (it disables the Access gate).
 
 ## Neon Postgres (opt-in; D1 is the default)
 
-D1 (SQLite) is the default db seam — zero external dependencies, auto-provisioned
+D1 (SQLite) is the default db seam: zero external dependencies, auto-provisioned
 by `wrangler deploy`, co-located with the Worker. That is the right default for
 this single-tenant template. Swap to Neon Postgres over Cloudflare Hyperdrive
 when you need real interactive transactions, no bound-parameter cap, large
 values without the ~1-2MB D1 ceiling, or to scale past D1's 10GB limit. The
-Worker auto-selects Postgres when a Hyperdrive binding is present — no code
+Worker auto-selects Postgres when a Hyperdrive binding is present, with no code
 change (see `src/db/index.ts`).
 
 ```bash
@@ -108,7 +108,7 @@ bun run dev       # wrangler dev reads HYPERDRIVE.localConnectionString
 
 The R2 `BLOBS` bucket stays useful under Postgres (large blob offload) and is
 optional either way. Migrating existing data from a live D1 deployment to
-Postgres is out of scope — a fresh Postgres database starts empty.
+Postgres is out of scope: a fresh Postgres database starts empty.
 
 ## Notes
 

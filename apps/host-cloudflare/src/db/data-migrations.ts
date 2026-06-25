@@ -90,7 +90,7 @@ export const runCloudflareDataMigrations = (
     runSqliteDataMigrations(d1DataMigrationClient(db), cloudflareDataMigrations(bucket)),
   );
 
-// Postgres (Neon) path — see ./postgres.ts. A fresh Postgres deployment has no
+// Postgres (Neon) path, see ./postgres.ts. A fresh Postgres deployment has no
 // legacy D1 data, so there is nothing to migrate. The existing data migration
 // (the Google OpenAPI ownership move + its R2 blob copy) is SQLite-specific
 // (`json_extract`/`json_type`, D1 sessions) and only relevant to deployments

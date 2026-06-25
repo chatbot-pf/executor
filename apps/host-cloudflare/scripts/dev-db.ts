@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Local dev Postgres via PGlite — no Docker, no install
+// Local dev Postgres via PGlite (no Docker, no install)
 // ---------------------------------------------------------------------------
 //
 // Exposes an in-process PGlite instance over a TCP socket so Hyperdrive's
@@ -8,7 +8,7 @@
 //
 // Unlike apps/cloud (which applies generated drizzle-kit migrations), the
 // Cloudflare host brings its schema up at RUNTIME via
-// `ensureDrizzleRuntimeSchemaFromTables`, so this script does the same here —
+// `ensureDrizzleRuntimeSchemaFromTables`, so this script does the same here:
 // the dev DB and the deployed Worker share one schema bring-up code path.
 
 import { execSync } from "node:child_process";
@@ -34,7 +34,7 @@ const DB_PATH = process.env.DEV_DB_PATH
   ? resolve(process.env.DEV_DB_PATH)
   : resolve(__dirname, "../.dev-db");
 
-// Reap any orphan dev-db from a previous run that didn't shut down cleanly —
+// Reap any orphan dev-db from a previous run that didn't shut down cleanly,
 // otherwise the new instance can't bind to PORT.
 function reapStaleDevDb() {
   const out = execSync(`lsof -ti tcp:${PORT} -sTCP:LISTEN 2>/dev/null || true`, {

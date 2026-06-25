@@ -78,7 +78,7 @@ describe("cloudflare host POSTGRES e2e (workerd/miniflare + PGlite)", () => {
 
   it("adds an OpenAPI source then reads it back across SEPARATE requests (per-request Postgres connection)", async () => {
     const slug = `pgapi-${runId}`;
-    // Request 1: a db write — opens a fresh connection, writes, releases it.
+    // Request 1: a db write that opens a fresh connection, writes, releases it.
     const add = await worker.fetch("/api/openapi/specs", {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -18,7 +18,7 @@ import { CLOUDFLARE_NAMESPACE, CLOUDFLARE_SCHEMA_VERSION, type CloudflareEnv } f
 import { runCloudflarePostgresDataMigrations } from "./data-migrations";
 
 // ---------------------------------------------------------------------------
-// Postgres (Neon via Hyperdrive) DbProvider — the opt-in alternative to the D1
+// Postgres (Neon via Hyperdrive) DbProvider: the opt-in alternative to the D1
 // seam (see ./d1.ts). Selected by ./index.ts when a Hyperdrive binding or a
 // direct DATABASE_URL is present; D1 stays the default.
 //
@@ -30,7 +30,7 @@ import { runCloudflarePostgresDataMigrations } from "./data-migrations";
 //   - HTTP (stateless Worker): the connection lives in a REQUEST-SCOPED service
 //     (`CfPgConnection`, acquired/released per request via `requestScoped` in
 //     ExecutorApp.make). The DbProvider just assembles the FumaDB handle over
-//     it and its `close` is a NO-OP — releasing the socket is the request
+//     it and its `close` is a NO-OP: releasing the socket is the request
 //     scope's job, NOT the executor-build scope's (which closes before the
 //     handler runs). The schema is brought up ONCE at boot
 //     (`ensurePostgresSchema`), never per request.

@@ -29,14 +29,14 @@ export interface CloudflareEnv {
   /** Optional Hyperdrive binding for Neon/Postgres. When present the db seam
    *  switches from D1 to Postgres-over-Hyperdrive (see `src/db/index.ts`).
    *  Provision with `wrangler hyperdrive create` and add the binding to
-   *  `wrangler.jsonc` — absent by default, so D1 stays the zero-setup default. */
+   *  `wrangler.jsonc`. Absent by default, so D1 stays the zero-setup default. */
   readonly HYPERDRIVE?: Hyperdrive;
   /** Direct Postgres connection string. Only used when
    *  `EXECUTOR_DIRECT_DATABASE_URL === "true"` (keeps Hyperdrive the default
    *  path); also serves as the fallback when a Hyperdrive binding is absent. */
   readonly DATABASE_URL?: string;
   /** Set to "true" to connect to `DATABASE_URL` directly instead of through
-   *  Hyperdrive. For local dev / admin scripts only — mirrors `apps/cloud`. */
+   *  Hyperdrive. For local dev / admin scripts only; mirrors `apps/cloud`. */
   readonly EXECUTOR_DIRECT_DATABASE_URL?: string;
   /** MCP session Durable Object namespace — one addressable isolate per MCP
    *  session (the DO id IS the session id), so a session survives across the
