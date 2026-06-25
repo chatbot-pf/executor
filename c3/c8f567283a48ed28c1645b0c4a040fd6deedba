@@ -1,0 +1,24 @@
+apps/host-cloudflare/scripts/dev-db.ts
+  s_c044d42bd5da21::t_3c4ca28b66fdb6 50-53,60-66
+apps/host-cloudflare/src/db/postgres.ts
+  s_c044d42bd5da21::t_928a17b0d7a858 111-115
+  s_c044d42bd5da21::t_9480b5fdca1aa2 165-174,179-180,182-183
+apps/host-cloudflare/src/worker.ts
+  s_c044d42bd5da21::t_521f60285dbc19 18-20,24-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "c3c8f567283a48ed28c1645b0c4a040fd6deedba",
+  "prompts": {},
+  "sessions": {
+    "s_c044d42bd5da21": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7350c9b8-2a13-43a2-920d-4c55e57b55eb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Minsu Lee <minsu.lee@passionfactory.ai>"
+    }
+  }
+}
