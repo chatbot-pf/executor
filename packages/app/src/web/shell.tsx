@@ -349,7 +349,7 @@ function SidebarContent(props: {
   return (
     <>
       {props.showBrand !== false && (
-        <div className="desktop-macos-sidebar-header flex h-12 shrink-0 items-center gap-2 border-b border-sidebar-border px-4">
+        <div className="desktop-macos-titlebar flex h-12 shrink-0 items-center gap-2 border-b border-sidebar-border px-4">
           <Link
             to="/{-$orgSlug}"
             className="desktop-macos-no-drag flex shrink-0 items-center gap-1.5"
@@ -481,7 +481,7 @@ export function Shell() {
     <div className="flex h-screen overflow-hidden">
       <CommandPalette />
       {/* Desktop sidebar */}
-      <aside className="hidden w-52 shrink-0 border-r border-sidebar-border bg-sidebar md:flex md:flex-col lg:w-56">
+      <aside className="desktop-macos-sidebar hidden w-52 shrink-0 border-r border-sidebar-border bg-sidebar md:flex md:flex-col lg:w-56">
         <SidebarContent
           pathname={pathname}
           updateAvailable={updateAvailable}
