@@ -1,0 +1,23 @@
+apps/docs/hosted/cloudflare.mdx
+  s_b1cbc9a4e6a6e8::t_ce7984ddc631f9 79-82
+  s_b1cbc9a4e6a6e8::t_78933bfd0af828 61-64,69,100-133
+  s_b1cbc9a4e6a6e8::t_3c39a6f77fcbc6 60,65
+  s_b1cbc9a4e6a6e8::t_d529f5ed97f393 66-68,70-78,83-99
+  s_b1cbc9a4e6a6e8::t_675375bb657217 134-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "9904d03165dc42310b83d651d11fa2f556f464d7",
+  "prompts": {},
+  "sessions": {
+    "s_b1cbc9a4e6a6e8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d6e5a16e-dbb2-4b5e-9f8e-c06bb360fccf",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Minsu Lee <minsu.lee@passionfactory.ai>"
+    }
+  }
+}
