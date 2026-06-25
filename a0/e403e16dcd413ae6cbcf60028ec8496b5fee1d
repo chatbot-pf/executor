@@ -1,0 +1,24 @@
+packages/core/sdk/src/executor.test.ts
+  s_9d8f942e423f6f::t_d53f284efb9f71 645-700
+.please/docs/review/rejected-findings.jsonl
+  s_9d8f942e423f6f::t_9679cf88d249b0 1-4
+packages/core/sdk/src/executor.ts
+  s_9d8f942e423f6f::t_7e2c93bfea293d 2501
+  s_9d8f942e423f6f::t_0d4a012e7f2b2d 2499-2500
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "a0e403e16dcd413ae6cbcf60028ec8496b5fee1d",
+  "prompts": {},
+  "sessions": {
+    "s_9d8f942e423f6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a06ac2a7-2e79-4b15-9c59-2e46b2501f76",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Minsu Lee <minsu.lee@passionfactory.ai>"
+    }
+  }
+}
