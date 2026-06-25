@@ -1,0 +1,40 @@
+packages/plugins/openapi/src/sdk/store.test.ts
+  s_9d8f942e423f6f::t_14f9a2f915c101 10,17-143,147-148,175-241
+packages/core/sdk/src/executor.ts
+  s_9d8f942e423f6f::t_5ddc0bb8c822b3 385-416
+  s_9d8f942e423f6f::t_85daa7038bf59a 855,861-868,871-882
+  s_9d8f942e423f6f::t_79393fdeaec097 1175,1177,1181-1183,1185
+packages/core/sdk/src/plugin-storage.ts
+  s_9d8f942e423f6f::t_9053a2e74c2498 110-116
+packages/core/sdk/src/plugin-storage.test.ts
+  s_9d8f942e423f6f::t_0f6351c3a4e439 81-82
+  s_9d8f942e423f6f::t_b366df8489e09f 299-311,318-343
+  s_9d8f942e423f6f::t_66564ef228c6c4 312-317
+.changeset/reduce-api-tools-server-time.md
+  s_9d8f942e423f6f::t_86f15fa3649d13 1-6
+packages/core/sdk/src/executor.test.ts
+  s_9d8f942e423f6f::t_66564ef228c6c4 551-601
+  s_9d8f942e423f6f::t_cd4c00319edfe0 507-512
+  s_9d8f942e423f6f::t_8e91accd59a2ba 102-104
+  s_9d8f942e423f6f::t_8f979c8d852698 6
+  s_9d8f942e423f6f::t_90e2e9437da6f9 3,14-15,19-20,23
+packages/plugins/openapi/src/sdk/store.ts
+  s_9d8f942e423f6f::t_e5edd86b03c27f 152-159,161
+  s_9d8f942e423f6f::t_66564ef228c6c4 160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "0b0d4ef8231c15c8648490f65aad349b128bc853",
+  "prompts": {},
+  "sessions": {
+    "s_9d8f942e423f6f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a06ac2a7-2e79-4b15-9c59-2e46b2501f76",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Minsu Lee <minsu.lee@passionfactory.ai>"
+    }
+  }
+}
