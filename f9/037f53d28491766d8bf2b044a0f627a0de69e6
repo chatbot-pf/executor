@@ -1,0 +1,19 @@
+apps/host-cloudflare/src/execution.ts
+  s_cdc6bcc588b978::t_c0583b586d1ddd 36-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "f9037f53d28491766d8bf2b044a0f627a0de69e6",
+  "prompts": {},
+  "sessions": {
+    "s_cdc6bcc588b978": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a4fa5ba-40ad-403f-8d1b-daa1ffecb57d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Minsu Lee <minsu.lee@passionfactory.ai>"
+    }
+  }
+}
