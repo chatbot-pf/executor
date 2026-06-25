@@ -108,7 +108,11 @@ export const ensurePostgresSchema = async (env: CloudflareEnv): Promise<void> =>
     await ensureDrizzleRuntimeSchemaFromTables(drizzleDb, options);
     await runCloudflarePostgresDataMigrations(sql, env.BLOBS);
   } finally {
-    void sql.end({ timeout: 0 });
+    // Await the boot connection's close (best-effort) so it is released before
+    // per-request connections open; .catch keeps a close failure from masking a
+    // DDL error thrown from the try.
+    // oxlint-disable-next-line executor/no-promise-catch -- boundary: postgres.js close is best-effort
+    await sql.end({ timeout: 0 }).catch(() => undefined);
   }
 };
 
@@ -158,14 +162,25 @@ export const postgresDbProviderLayer = (
 export const createPostgresExecutorDb = async (env: CloudflareEnv): Promise<ExecutorDbHandle> => {
   const sql = makeSql(env, "long-lived");
   const drizzleDb = drizzle(sql, { schema: runtimeSchema() });
-  await ensureDrizzleRuntimeSchemaFromTables(drizzleDb, options);
-  await runCloudflarePostgresDataMigrations(sql, env.BLOBS);
+  // oxlint-disable executor/no-try-catch-or-throw -- boundary: release the session connection if schema bring-up throws; a momentary DB outage at session start would otherwise leak the long-lived socket (idle_timeout 5s) on Neon's backend
+  try {
+    await ensureDrizzleRuntimeSchemaFromTables(drizzleDb, options);
+    await runCloudflarePostgresDataMigrations(sql, env.BLOBS);
+  } catch (err) {
+    // oxlint-disable-next-line executor/no-promise-catch -- boundary: best-effort release on the failure path
+    await sql.end({ timeout: 0 }).catch(() => undefined);
+    throw err;
+  }
+  // oxlint-enable executor/no-try-catch-or-throw
   const { db: fumaDb, fuma } = createExecutorFumaDb(drizzleDb, options);
   return {
     db: fumaDb,
     fuma,
+    // The DO base's end() delegates to this close for real session teardown, so
+    // await the socket close (best-effort) rather than fire-and-forget.
     close: async () => {
-      void sql.end({ timeout: 0 });
+      // oxlint-disable-next-line executor/no-promise-catch -- boundary: postgres.js close is best-effort at session teardown
+      await sql.end({ timeout: 0 }).catch(() => undefined);
     },
     blobs: blobStore(env),
   };

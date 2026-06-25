@@ -15,11 +15,20 @@ export { McpSessionDO } from "./mcp";
 
 let handlerPromise: Promise<(request: Request) => Promise<Response>> | null = null;
 
-const resolveHandler = (env: CloudflareEnv): Promise<(request: Request) => Promise<Response>> => {
+const resolveHandler = async (
+  env: CloudflareEnv,
+): Promise<(request: Request) => Promise<Response>> => {
   if (!handlerPromise) {
     handlerPromise = makeCloudflareApp(env).then(({ toWebHandler }) => toWebHandler().handler);
   }
-  return handlerPromise;
+  // oxlint-disable executor/no-try-catch-or-throw -- boundary: a boot failure (e.g. Postgres unreachable during schema bring-up) must not permanently poison the isolate; the memoized promise would replay the same rejection for every later request. Clear the memo on failure so the next request reattempts boot. D1 boots never hit this (a built-in binding does not fail); the Postgres path makes it a real network failure mode.
+  try {
+    return await handlerPromise;
+  } catch (err) {
+    handlerPromise = null;
+    throw err;
+  }
+  // oxlint-enable executor/no-try-catch-or-throw
 };
 
 export default {

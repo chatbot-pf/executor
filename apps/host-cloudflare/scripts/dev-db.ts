@@ -47,13 +47,23 @@ function reapStaleDevDb() {
     const cmd = execSync(`ps -p ${pid} -o args= 2>/dev/null || true`, {
       encoding: "utf8",
     }).trim();
+    // The PID can exit between `lsof` and `ps` (the stale instance shutting down
+    // on its own): an empty cmd means it is already gone and the port is free, so
+    // skip it rather than misreading it as an unexpected process and bailing.
+    if (cmd === "") continue;
     if (!cmd.includes("dev-db.ts")) {
       console.error(`[dev-db] Port ${PORT} is held by an unexpected process (pid ${pid}): ${cmd}`);
       console.error(`[dev-db] Refusing to kill it. Free the port and retry.`);
       process.exit(1);
     }
     console.log(`[dev-db] Reaping stale dev-db (pid ${pid})`);
-    execSync(`kill -KILL ${pid}`);
+    // process.kill (a Node built-in, no subshell) instead of `kill -KILL`;
+    // tolerate ESRCH if the process exited between the check above and here.
+    try {
+      process.kill(Number(pid), "SIGKILL");
+    } catch {
+      // already gone
+    }
   }
   return true;
 }
