@@ -1,0 +1,21 @@
+CLAUDE.md
+  s_cdc6bcc588b978::t_3c5d202da5ad62 6-12
+apps/host-cloudflare/wrangler.jsonc
+  s_cdc6bcc588b978::t_dc8a99af779b37 17,25,58-59,62-64
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "1f03325b4e0389151ddada92ced233aff423833e",
+  "prompts": {},
+  "sessions": {
+    "s_cdc6bcc588b978": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2a4fa5ba-40ad-403f-8d1b-daa1ffecb57d",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Minsu Lee <minsu.lee@passionfactory.ai>"
+    }
+  }
+}
