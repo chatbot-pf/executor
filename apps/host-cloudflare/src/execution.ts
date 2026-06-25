@@ -33,8 +33,18 @@ export { EngineDecoratorNoop };
 
 export const makeCloudflareCodeExecutorProvider = (
   loader: WorkerLoader,
-): Layer.Layer<CodeExecutorProvider> =>
-  Layer.sync(CodeExecutorProvider, () => makeDynamicWorkerExecutor({ loader }));
+): Layer.Layer<CodeExecutorProvider> => {
+  if (!loader) {
+    // The dynamic-worker executor only touches `loader` on the first `execute`,
+    // so a missing binding would otherwise surface as an opaque "undefined" defect
+    // mid-execution. Fail at app boot with an actionable message instead.
+    // oxlint-disable-next-line executor/no-try-catch-or-throw, executor/no-error-constructor -- boundary: the Worker cannot execute code without the LOADER binding
+    throw new Error(
+      "Missing LOADER binding: add `worker_loaders` to wrangler.jsonc (Worker Loaders requires a paid Workers plan).",
+    );
+  }
+  return Layer.sync(CodeExecutorProvider, () => makeDynamicWorkerExecutor({ loader }));
+};
 
 export const makeCloudflarePluginsProvider = (
   config: CloudflareConfig,
