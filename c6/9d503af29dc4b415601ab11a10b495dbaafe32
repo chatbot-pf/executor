@@ -1,0 +1,47 @@
+apps/host-cloudflare/src/mcp/session-durable-object.ts
+  s_c044d42bd5da21::t_6e6b717a519ad3 57
+apps/host-cloudflare/src/db/index.ts
+  s_c044d42bd5da21::t_48e8b6656a37f9 21-22
+  s_c044d42bd5da21::t_53052d7f7e3ccb 51
+  s_c044d42bd5da21::t_14c5277addd314 17
+apps/host-cloudflare/src/db/postgres.test.ts
+  s_c044d42bd5da21::t_2a8d8f5b5cc9fd 13
+apps/host-cloudflare/src/db/postgres.ts
+  s_c044d42bd5da21::t_4750c1d436bd0b 21
+  s_c044d42bd5da21::t_c6abd7e0fdd034 33
+apps/host-cloudflare/src/worker-postgres.e2e.node.test.ts
+  s_c044d42bd5da21::t_58636b4f3e443a 81
+apps/host-cloudflare/scripts/dev-db.ts
+  s_c044d42bd5da21::t_e3885c64e5a70c 37
+  s_c044d42bd5da21::t_e6e35fddcb8eef 2
+  s_c044d42bd5da21::t_ea952ebaabefd2 11
+apps/host-cloudflare/src/db/index.test.ts
+  s_c044d42bd5da21::t_07bd594c695088 43-46,48-58
+  s_c044d42bd5da21::t_efeba24e412bf3 37
+  s_c044d42bd5da21::t_8369c27cb913fa 47
+apps/host-cloudflare/README.md
+  s_c044d42bd5da21::t_3bebd80390b7bc 111
+  s_c044d42bd5da21::t_49449635d198c7 82
+  s_c044d42bd5da21::t_4f040990b5f3c0 87
+apps/host-cloudflare/src/config.ts
+  s_c044d42bd5da21::t_b64ca5035946cf 39
+  s_c044d42bd5da21::t_042275f9611d12 32
+apps/host-cloudflare/src/db/data-migrations.ts
+  s_c044d42bd5da21::t_dddd7b24096275 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "c69d503af29dc4b415601ab11a10b495dbaafe32",
+  "prompts": {},
+  "sessions": {
+    "s_c044d42bd5da21": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7350c9b8-2a13-43a2-920d-4c55e57b55eb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Minsu Lee <minsu.lee@passionfactory.ai>"
+    }
+  }
+}
