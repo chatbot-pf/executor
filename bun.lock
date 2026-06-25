@@ -189,6 +189,7 @@
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
         "jose": "^5.9.6",
+        "postgres": "^3.4.9",
         "quickjs-emscripten-core": "0.31.0",
         "react": "catalog:",
         "react-dom": "catalog:",
@@ -196,6 +197,8 @@
       "devDependencies": {
         "@cloudflare/workers-types": "^4.20250410.0",
         "@effect/vitest": "catalog:",
+        "@electric-sql/pglite": "^0.4.4",
+        "@electric-sql/pglite-socket": "^0.1.4",
         "@executor-js/vite-plugin": "workspace:*",
         "@tailwindcss/vite": "catalog:",
         "@tanstack/router-plugin": "^1.167.12",
