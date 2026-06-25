@@ -13,7 +13,6 @@ import {
 import { loadConfig, type CloudflareConfig, type CloudflareEnv } from "../config";
 import { createD1ExecutorDb } from "../db/d1";
 import { makeCloudflareExecutionStackLayer, makeExecutionStack } from "../execution";
-import { preloadQuickJs } from "../quickjs";
 
 // ---------------------------------------------------------------------------
 // Cloudflare (self-host) MCP Session Durable Object — the host-cloudflare
@@ -24,7 +23,7 @@ import { preloadQuickJs } from "../quickjs";
 //                         `end` disposal contract.
 //   - resolveSessionMeta → single-tenant: the org is fixed in config, so no
 //                         lookup — just stamp the configured org name.
-//   - buildMcpServer    → the QuickJS execution stack + the MCP tool server.
+//   - buildMcpServer    → the dynamic-worker execution stack + the MCP tool server.
 // host-cf has no OTel/Sentry, so it keeps the base's default no-op telemetry +
 // error seams. Replacing the prior in-memory store with this DO is what fixes
 // `tools/list` failing across Worker isolates (a session created on one isolate
@@ -72,14 +71,13 @@ export class McpSessionDO extends McpSessionDOBase<CfSessionDbHandle> {
     const config = this.cfConfig;
     const self = this;
     return Effect.gen(function* () {
-      // QuickJS-WASM must be loaded before the executor layer builds it (the
-      // default variant can't fetch its .wasm on Workers). Idempotent per isolate.
-      yield* Effect.promise(() => preloadQuickJs());
       const { engine } = yield* makeExecutionStack(
         sessionMeta.userId,
         sessionMeta.organizationId,
         sessionMeta.organizationName,
-      ).pipe(Effect.provide(makeCloudflareExecutionStackLayer(config, dbHandle)));
+      ).pipe(
+        Effect.provide(makeCloudflareExecutionStackLayer(config, dbHandle, self.cfEnv.LOADER)),
+      );
       // Browser elicitation mode (the base owns the approval store + the HTTP
       // approval RPCs): a gated execution pauses and returns an approvalUrl into
       // the console resume page. The URL origin is the create request's origin
