@@ -1,0 +1,57 @@
+apps/host-cloudflare/package.json
+  s_c044d42bd5da21::t_3b2c3625a5324f 50-51
+  s_c044d42bd5da21::t_18ede7b0b01d5f 10
+  s_c044d42bd5da21::t_f0e7ce82e80fac 42
+apps/host-cloudflare/wrangler.jsonc
+  s_c044d42bd5da21::t_f5af3efcb4fb24 36-54
+apps/host-cloudflare/src/config.ts
+  s_c044d42bd5da21::t_5d735ccb06a1b1 29-40
+  s_c044d42bd5da21::t_cea2dee8770e27 1-6
+apps/host-cloudflare/src/db/postgres.ts
+  s_c044d42bd5da21::t_b995378ea31df4 1-43,45-93
+  s_c044d42bd5da21::t_835de385d4a27a 44
+apps/host-cloudflare/src/db/index.test.ts
+  s_c044d42bd5da21::t_680aa24d79fe01 11,15
+  s_c044d42bd5da21::t_835de385d4a27a 46
+  s_c044d42bd5da21::t_e00fa50b4aae40 1-10,12-14,16-45,47-69
+apps/host-cloudflare/scripts/dev-db.ts
+  s_c044d42bd5da21::t_80f3f4c8de6955 1-91
+apps/host-cloudflare/src/db/index.ts
+  s_c044d42bd5da21::t_3d66d3bf3337ba 1-38
+apps/host-cloudflare/src/db/data-migrations.ts
+  s_c044d42bd5da21::t_979efddd0ade29 2
+  s_c044d42bd5da21::t_6015bb3595b99d 92-103
+apps/host-cloudflare/src/app.ts
+  s_c044d42bd5da21::t_b33d984855c227 8
+  s_c044d42bd5da21::t_5c7ddec4b6e58b 43-47
+apps/host-cloudflare/src/mcp/session-durable-object.ts
+  s_c044d42bd5da21::t_fa04643e72b95c 14
+  s_c044d42bd5da21::t_71f3e91df7ce45 34-36
+  s_c044d42bd5da21::t_e0e2280082aa86 53
+apps/host-cloudflare/src/db/postgres.test.ts
+  s_c044d42bd5da21::t_d9c63979f495ca 102
+  s_c044d42bd5da21::t_f2c4820a5220f1 72,75,82,87,90,99,107,110
+  s_c044d42bd5da21::t_de7e0642733366 1-19,21-31,36-54,56-60,62-71,73-74,76-81,83-86,88-89,91-98,100-101,103-106,108-109,111-116
+  s_c044d42bd5da21::t_9cf98f51b1c1fe 20,32-35
+  s_c044d42bd5da21::t_5b831ccdaeb5d1 55
+  s_c044d42bd5da21::t_bbfadf67eefb6d 61
+apps/host-cloudflare/README.md
+  s_c044d42bd5da21::t_835de385d4a27a 10
+  s_c044d42bd5da21::t_fd9b30f569837d 80-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "0a08c9fcf480dd2a881daff865c272dfb6ef6f2f",
+  "prompts": {},
+  "sessions": {
+    "s_c044d42bd5da21": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7350c9b8-2a13-43a2-920d-4c55e57b55eb",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Minsu Lee <minsu.lee@passionfactory.ai>"
+    }
+  }
+}
