@@ -14,6 +14,7 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*", "/mcp", "/mcp/*"],
   },
+  "placement": { "mode": "smart" },
   // D1 is the app's SQLite store (the DbProvider seam). `wrangler deploy`
   // auto-provisions it on first deploy; replace database_id after that, or run
   // `wrangler d1 create executor` and paste the id here.
@@ -21,7 +22,7 @@
     {
       "binding": "DB",
       "database_name": "executor",
-      "database_id": "ae748ca1-032c-4427-a1a0-fe39db77d1a9",
+      "database_id": "4bcd3ad7-3e99-4139-955c-d48f8751cf4e",
     },
   ],
   // Plugin blob seam backend: multi-MB values (resolved OpenAPI specs,
@@ -54,13 +55,13 @@
   // (the at-rest secret-encryption key) is a SECRET — set it with
   // `wrangler secret put EXECUTOR_SECRET_KEY`, never in vars.
   "vars": {
-    "ACCESS_TEAM_DOMAIN": "your-team.cloudflareaccess.com",
-    "ACCESS_AUD": "",
+    "ACCESS_TEAM_DOMAIN": "balancefriends.cloudflareaccess.com",
+    "ACCESS_AUD": "cef8f0f285c7559562d109f0e8799b9cfc905bb7e4df666d7ba10eb8455998cd",
     "ACCESS_NAME_CLAIM": "name",
     "ACCESS_GROUPS_CLAIM": "groups",
-    "ADMIN_EMAILS": "",
-    "SELF_HOSTED_ORG_ID": "default",
-    "SELF_HOSTED_ORG_NAME": "Default",
+    "ADMIN_EMAILS": "minsu.lee@passionfactory.ai",
+    "SELF_HOSTED_ORG_ID": "passionfactory",
+    "SELF_HOSTED_ORG_NAME": "PassionFactory",
     // VITE_PUBLIC_SITE_URL is intentionally unset: with no static URL the worker
     // derives the web base URL from each request's origin (RequestWebOrigin), so
     // secret/OAuth handoff links match whatever host the user actually reached.
