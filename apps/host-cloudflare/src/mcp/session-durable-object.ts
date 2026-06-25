@@ -51,7 +51,13 @@ export class McpSessionDO extends McpSessionDOBase<CfSessionDbHandle> {
 
   protected override async openSessionDb(): Promise<CfSessionDbHandle> {
     const handle = await createExecutorDb(this.cfEnv);
-    return { ...handle, end: () => handle.close() };
+    // The base owns this connection's lifecycle for the whole session and
+    // disposes it via `end()` at runtime teardown. Neutralize the handle's own
+    // `close` so the per-engine-build DbProvider scope (built once when the MCP
+    // server is created) does NOT end the session connection early — for D1
+    // `close` was already a no-op, but the Postgres connection must survive the
+    // build scope and live for the session. `end` runs the real teardown.
+    return { ...handle, close: async () => {}, end: () => handle.close() };
   }
 
   protected override resolveSessionMeta(token: McpSessionInit): Effect.Effect<SessionMeta> {

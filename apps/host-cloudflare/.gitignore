@@ -1,4 +1,5 @@
 dist/
+.dev-db/
 .dev.vars
 .wrangler/
 wrangler.preview.jsonc

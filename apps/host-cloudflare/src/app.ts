@@ -1,11 +1,10 @@
-import { Effect } from "effect";
 import { HttpEffect, HttpRouter } from "effect/unstable/http";
 
-import { dbProviderLayer, ExecutorApp, textFailureStrategy } from "@executor-js/api/server";
+import { ExecutorApp, textFailureStrategy } from "@executor-js/api/server";
 
 import { loadConfig, type CloudflareEnv } from "./config";
 import { makeCloudflarePlugins } from "./plugins";
-import { createExecutorDb } from "./db";
+import { selectDbSeam } from "./db";
 import { cloudflareAccessIdentityLayer } from "./auth/cloudflare-access";
 import {
   CloudflareCodeExecutorProvider,
@@ -40,35 +39,36 @@ export const makeCloudflareApp = async (env: CloudflareEnv) => {
   // executor is built — the default variant can't fetch its .wasm on Workers.
   await preloadQuickJs();
 
-  // Open + idempotently bring up the schema once (the long-lived handle the
-  // per-request scoped executor reads through the DbProvider seam). The seam is
-  // D1 by default; a Hyperdrive binding / DATABASE_URL switches it to Postgres
-  // (see ./db/index.ts).
-  const dbHandle = await createExecutorDb(env);
+  // The db seam: D1 by default (one memoized handle); a Hyperdrive binding /
+  // DATABASE_URL switches it to Postgres, where the schema is brought up once
+  // here and each request gets a fresh connection in its own fiber scope via
+  // `requestScoped` (Cloudflare forbids sharing a socket across requests).
+  const seam = await selectDbSeam(env);
   const identityLayer = cloudflareAccessIdentityLayer(config);
   // MCP runs through the `MCP_SESSION` Durable Object (cross-isolate sessions);
-  // each session DO opens its own D1 handle, so it takes `env`, not `dbHandle`.
+  // each session DO opens its own db handle, so it takes `env`, not a handle.
   const mcp = makeCloudflareMcpSeams(config, env);
 
-  const { appLayer, toWebHandler } = ExecutorApp.make({
-    plugins,
-    providers: {
-      identity: identityLayer,
-      db: dbProviderLayer(Effect.succeed(dbHandle)),
-      engine: { codeExecutor: CloudflareCodeExecutorProvider }, // decorator defaults to no-op
-      plugins: {
-        provider: makeCloudflarePluginsProvider(config),
-        config: makeCloudflareHostConfig(config),
-      },
-      errorCapture: ErrorCaptureLive,
-      // The account API (`/api/account/*`) backs the shared multiplayer shell's
-      // auth context; `me` reflects the Access principal. Members/keys are
-      // Access-managed, so the rest of the surface is stubbed.
-      account: cloudflareAccountMiddleware(config),
-      // The MCP serving envelope: Access-JWT auth + the shared in-process session
-      // store over the QuickJS engine.
-      mcp: { auth: mcp.auth, sessions: mcp.sessions, reporter: mcp.reporter },
+  // Everything but the db provider + (Postgres-only) request scope is identical
+  // across the two seams.
+  const commonProviders = {
+    identity: identityLayer,
+    engine: { codeExecutor: CloudflareCodeExecutorProvider }, // decorator defaults to no-op
+    plugins: {
+      provider: makeCloudflarePluginsProvider(config),
+      config: makeCloudflareHostConfig(config),
     },
+    errorCapture: ErrorCaptureLive,
+    // The account API (`/api/account/*`) backs the shared multiplayer shell's
+    // auth context; `me` reflects the Access principal. Members/keys are
+    // Access-managed, so the rest of the surface is stubbed.
+    account: cloudflareAccountMiddleware(config),
+    // The MCP serving envelope: Access-JWT auth + the shared in-process session
+    // store over the QuickJS engine.
+    mcp: { auth: mcp.auth, sessions: mcp.sessions, reporter: mcp.reporter },
+  };
+  const common = {
+    plugins,
     extensions: {
       routes: [
         // Browser approval of paused MCP executions: the console resume page
@@ -77,9 +77,26 @@ export const makeCloudflareApp = async (env: CloudflareEnv) => {
         HttpRouter.add("*", "/api/mcp-sessions/*", HttpEffect.fromWebHandler(mcp.approvalHandler)),
       ],
     },
-    config: { mountPrefix: "/api", failure: textFailureStrategy },
+    config: { mountPrefix: "/api" as const, failure: textFailureStrategy },
     boot: identityLayer,
-  });
+  };
+
+  // Postgres provides its per-request connection through `requestScoped` so the
+  // socket's acquire/release spans the whole request fiber; D1 needs no request
+  // scope. Two `make` calls (rather than a conditional field) keep the residual
+  // types exact: Postgres's `db` carries a `CfPgConnection` requirement that
+  // only `requestScoped` satisfies.
+  const { appLayer, toWebHandler } =
+    seam.kind === "postgres"
+      ? ExecutorApp.make({
+          ...common,
+          providers: { ...commonProviders, db: seam.db },
+          requestScoped: seam.requestScoped,
+        })
+      : ExecutorApp.make({
+          ...common,
+          providers: { ...commonProviders, db: seam.db },
+        });
 
   return { appLayer, toWebHandler };
 };
