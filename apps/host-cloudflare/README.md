@@ -4,14 +4,14 @@ Executor as a single Cloudflare Worker. The fourth app on the shared
 `ExecutorApp.make` facade (alongside cloud, self-host, and local) — same code
 paths, different injected providers:
 
-| Seam         | Cloudflare provider                                              |
-| ------------ | ---------------------------------------------------------------- |
-| **identity** | Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`) — no app login |
-| **db**       | D1 (SQLite) via the shared FumaDB assembly                       |
-| **engine**   | QuickJS-WASM, in-Worker (no extra binding)                       |
-| **mcp**      | Access-JWT auth + the shared in-process session store            |
-| **account**  | `/account/me` from the Access principal (members/keys → Access)  |
-| **web**      | the shared multiplayer SPA (Workers Static Assets)               |
+| Seam         | Cloudflare provider                                               |
+| ------------ | ----------------------------------------------------------------- |
+| **identity** | Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`) — no app login  |
+| **db**       | D1 (SQLite) via the shared FumaDB assembly                        |
+| **engine**   | dynamic-worker (Worker Loaders via `LOADER`), same as cloud       |
+| **mcp**      | Access-JWT auth + the `McpSessionDO` Durable Object session store |
+| **account**  | `/account/me` from the Access principal (members/keys → Access)   |
+| **web**      | the shared multiplayer SPA (Workers Static Assets)                |
 
 Single-tenant: every Access-verified principal belongs to the one configured
 org. Members and credentials are managed in Cloudflare Access, not in-app.
@@ -79,11 +79,11 @@ environment (it disables the Access gate).
 
 ## Notes
 
-- The QuickJS engine WASM is vendored into `src/quickjs-engine.wasm` (Workers
-  forbid runtime WASM compilation; it must be statically imported). Refresh it
-  after bumping the engine with `bun run vendor-wasm`.
-- MCP sessions live in-process (one isolate owns a session). The cross-isolate
-  upgrade is a Durable Object behind the same `McpSessionStore` seam.
-- When Cloudflare's dynamic Worker Loader leaves closed beta, the QuickJS code
-  substrate swaps for the dynamic-worker executor behind the `engine` seam — a
-  one-Layer change.
+- The `engine` seam runs the dynamic-worker executor (the same substrate cloud
+  uses): each code execution loads a fresh workerd isolate through the `LOADER`
+  Worker Loader binding (`wrangler.jsonc` → `worker_loaders`). This gives
+  structured-clone fidelity at the tool boundary (`Blob`/`File`/`Uint8Array`,
+  `Date`/`Map`/`Set`) plus `nodejs_compat`/`fetch`. Worker Loaders is open beta
+  (since 2026-03-24) and requires a **paid** Workers plan.
+- MCP sessions are stored in the `McpSessionDO` Durable Object (the DO id is the
+  session id), so a session survives across the Worker's stateless isolates.

@@ -10,29 +10,31 @@ import {
   PluginsProvider,
   type ExecutorDbHandle,
 } from "@executor-js/api/server";
-import { makeQuickJsExecutor } from "@executor-js/runtime-quickjs";
+import { makeDynamicWorkerExecutor } from "@executor-js/runtime-dynamic-worker";
 
 import type { CloudflareConfig } from "./config";
 import { makeCloudflarePlugins } from "./plugins";
 
 // ---------------------------------------------------------------------------
-// Cloudflare execution-stack seams — the same shape as self-host (QuickJS code
-// substrate, no-op engine decorator), with the plugins + host config built from
-// the per-request `env`-derived config rather than process.env.
+// Cloudflare execution-stack seams. The plugins + host config are built from the
+// per-request `env`-derived config rather than process.env, with a no-op engine
+// decorator (no billing).
 //
-// QuickJS-wasm is the default code substrate because it runs in a single Worker
-// with no extra binding. When Cloudflare's dynamic Worker Loader leaves closed
-// beta, swap CodeExecutorProvider for the dynamic-worker executor (cloud's) —
-// it's a one-Layer change behind this same seam.
+// The code substrate is the dynamic-worker executor (the same one cloud uses):
+// each execution loads a fresh workerd isolate through the `LOADER` Worker Loader
+// binding. Unlike cloud, which reads the ambient `cloudflare:workers` env, the
+// host threads `env.LOADER` explicitly through the seam (the host's deliberate
+// pattern: a Worker receives its bindings per request, so providers close over
+// `env` rather than a module-scope import).
 // ---------------------------------------------------------------------------
 
 export { makeExecutionStack } from "@executor-js/api/server";
 export { EngineDecoratorNoop };
 
-export const CloudflareCodeExecutorProvider: Layer.Layer<CodeExecutorProvider> = Layer.sync(
-  CodeExecutorProvider,
-  () => makeQuickJsExecutor(),
-);
+export const makeCloudflareCodeExecutorProvider = (
+  loader: WorkerLoader,
+): Layer.Layer<CodeExecutorProvider> =>
+  Layer.sync(CodeExecutorProvider, () => makeDynamicWorkerExecutor({ loader }));
 
 export const makeCloudflarePluginsProvider = (
   config: CloudflareConfig,
@@ -58,6 +60,7 @@ export const makeCloudflareHostConfig = (config: CloudflareConfig): Layer.Layer<
 export const makeCloudflareExecutionStackLayer = (
   config: CloudflareConfig,
   dbHandle: ExecutorDbHandle,
+  loader: WorkerLoader,
 ): Layer.Layer<
   DbProvider | PluginsProvider | HostConfig | CodeExecutorProvider | EngineDecorator
 > =>
@@ -65,6 +68,6 @@ export const makeCloudflareExecutionStackLayer = (
     dbProviderLayer(Effect.succeed(dbHandle)),
     makeCloudflarePluginsProvider(config),
     makeCloudflareHostConfig(config),
-    CloudflareCodeExecutorProvider,
+    makeCloudflareCodeExecutorProvider(loader),
     EngineDecoratorNoop,
   );

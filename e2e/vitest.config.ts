@@ -49,6 +49,9 @@ export default defineConfig({
         include: [
           "scenarios/browser-approval.test.ts",
           "scenarios/microsoft-graph-full.test.ts",
+          // Proves the dynamic-worker code substrate (Worker Loaders) runs an
+          // `execute` end to end on the Cloudflare worker, not just QuickJS.
+          "scenarios/mcp-execute.test.ts",
           "cloudflare/**/*.test.ts",
         ],
         fileParallelism: false,

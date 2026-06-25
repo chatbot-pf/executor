@@ -8,10 +8,11 @@ import { unstable_dev, type Unstable_DevWorker } from "wrangler";
 
 // ---------------------------------------------------------------------------
 // End-to-end test for the Cloudflare host: boots the REAL worker on workerd via
-// Miniflare (wrangler `unstable_dev`) with a local D1 + R2, dev-auth on. This is
-// the only test that exercises the CF-specific stack together — D1 schema
-// bring-up, the R2-backed blob seam (multi-MB spec storage), QuickJS-WASM
-// execution, and the MCP envelope — through the actual HTTP surface.
+// Miniflare (wrangler `unstable_dev`) with a local D1 + R2 + Worker Loaders,
+// dev-auth on. This is the only test that exercises the CF-specific stack
+// together, through the actual HTTP surface: D1 schema bring-up, the R2-backed
+// blob seam (multi-MB spec storage), the dynamic-worker code substrate (Worker
+// Loaders via the `LOADER` binding), and the MCP envelope.
 // ---------------------------------------------------------------------------
 
 const dir = fileURLToPath(new URL(".", import.meta.url));
@@ -60,7 +61,7 @@ describe("cloudflare host e2e (workerd/miniflare)", () => {
     await worker?.stop();
   });
 
-  it("executes TypeScript via /api/executions (QuickJS on workerd)", async () => {
+  it("executes TypeScript via /api/executions (dynamic-worker on workerd)", async () => {
     const res = await worker.fetch("/api/executions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -75,6 +76,25 @@ describe("cloudflare host e2e (workerd/miniflare)", () => {
     expect(body.status).toBe("completed");
     expect(body.isError).toBe(false);
     expect(body.text).toBe("42");
+  }, 60_000);
+
+  it("runs code using a Node API (Buffer), proving nodejs_compat in the dynamic-worker isolate", async () => {
+    // A capability the prior QuickJS-WASM substrate could NOT provide: the
+    // dynamic-worker isolate boots with `nodejs_compat`, so `Buffer` (and the
+    // node:* builtins) are available. QuickJS-WASM had no node compat, so this
+    // doubles as a regression guard that the engine really is dynamic-worker.
+    const res = await worker.fetch("/api/executions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        code: 'export default Buffer.from("hello").toString("base64")',
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { status: string; text: string; isError: boolean };
+    expect(body.status).toBe("completed");
+    expect(body.isError).toBe(false);
+    expect(body.text).toBe("aGVsbG8=");
   }, 60_000);
 
   it("adds a LARGE OpenAPI source — exercises the R2 blob seam (~1MB spec) + createMany batching (>100 tools)", async () => {
@@ -216,7 +236,7 @@ describe("cloudflare host e2e (workerd/miniflare)", () => {
     expect(toolNames).toContain("execute");
   }, 60_000);
 
-  it("invokes the execute tool over MCP (initialize → tools/call → QuickJS)", async () => {
+  it("invokes the execute tool over MCP (initialize → tools/call → dynamic-worker)", async () => {
     const accept = "application/json, text/event-stream";
     const rpc = (sessionId: string | null, body: unknown) =>
       worker.fetch("/mcp", {

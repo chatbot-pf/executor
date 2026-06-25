@@ -42,6 +42,12 @@
     "bindings": [{ "name": "MCP_SESSION", "class_name": "McpSessionDO" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["McpSessionDO"] }],
+  // Worker Loaders (Dynamic Workers): the `engine` seam's code substrate. Each
+  // `execute` spins a fresh workerd isolate via this binding (the same runtime
+  // cloud uses), giving structured-clone fidelity (Blob/File/Uint8Array, Date/
+  // Map/Set) and `nodejs_compat`/`fetch` that the prior in-Worker QuickJS-WASM
+  // substrate could not. Open beta since 2026-03-24; requires a PAID Workers plan.
+  "worker_loaders": [{ "binding": "LOADER" }],
   // Cloudflare Access is the entire auth layer: the Worker validates the
   // Cf-Access-Jwt-Assertion JWT against the team JWKS. Set these to your Zero
   // Trust team domain + the Access application's AUD tag. EXECUTOR_SECRET_KEY
