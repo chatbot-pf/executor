@@ -1,0 +1,19 @@
+CLAUDE.md
+  s_188191ed457d31::t_d836464a03760a 6-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.5.13",
+  "base_commit_sha": "563fe38ca7e106d3e489fac4b836b40e37a5be6a",
+  "prompts": {},
+  "sessions": {
+    "s_188191ed457d31": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d0ae5a56-a6b2-4524-9a8d-d16b162c92b3",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Minsu Lee <minsu.lee@passionfactory.ai>"
+    }
+  }
+}
