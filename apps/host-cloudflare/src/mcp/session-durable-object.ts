@@ -11,7 +11,7 @@ import {
 } from "@executor-js/cloudflare/mcp/durable-object";
 
 import { loadConfig, type CloudflareConfig, type CloudflareEnv } from "../config";
-import { createD1ExecutorDb } from "../db/d1";
+import { createExecutorDb } from "../db";
 import { makeCloudflareExecutionStackLayer, makeExecutionStack } from "../execution";
 import { preloadQuickJs } from "../quickjs";
 
@@ -31,8 +31,9 @@ import { preloadQuickJs } from "../quickjs";
 // was invisible to the next; the DO id == session id routes them all back).
 // ---------------------------------------------------------------------------
 
-// The long-lived D1 handle, adapted to the base's `end` contract. D1 owns its
-// own lifecycle (the binding is the connection), so `end` is `close` — a no-op.
+// The long-lived db handle, adapted to the base's `end` contract. `end`
+// delegates to the handle's `close`: for D1 that's a no-op (the binding owns its
+// lifecycle); for Postgres it ends the per-session connection (sql.end()).
 type CfSessionDbHandle = ExecutorDbHandle & { readonly end: () => Promise<void> };
 
 export class McpSessionDO extends McpSessionDOBase<CfSessionDbHandle> {
@@ -49,7 +50,7 @@ export class McpSessionDO extends McpSessionDOBase<CfSessionDbHandle> {
   }
 
   protected override async openSessionDb(): Promise<CfSessionDbHandle> {
-    const handle = await createD1ExecutorDb(this.cfEnv.DB, this.cfEnv.BLOBS);
+    const handle = await createExecutorDb(this.cfEnv);
     return { ...handle, end: () => handle.close() };
   }
 

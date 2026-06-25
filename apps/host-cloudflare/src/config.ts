@@ -1,4 +1,9 @@
-import type { D1Database, DurableObjectNamespace, R2Bucket } from "@cloudflare/workers-types";
+import type {
+  D1Database,
+  DurableObjectNamespace,
+  Hyperdrive,
+  R2Bucket,
+} from "@cloudflare/workers-types";
 
 import { isValidOrgSlug } from "@executor-js/api";
 import { missingPublicOriginWarning, resolvePublicOrigin } from "@executor-js/sdk/public-origin";
@@ -21,6 +26,18 @@ export interface CloudflareEnv {
   readonly DB: D1Database;
   /** R2 bucket binding — holds values too large for a D1 row (~1-2MB cap). */
   readonly BLOBS?: R2Bucket;
+  /** Optional Hyperdrive binding for Neon/Postgres. When present the db seam
+   *  switches from D1 to Postgres-over-Hyperdrive (see `src/db/index.ts`).
+   *  Provision with `wrangler hyperdrive create` and add the binding to
+   *  `wrangler.jsonc` — absent by default, so D1 stays the zero-setup default. */
+  readonly HYPERDRIVE?: Hyperdrive;
+  /** Direct Postgres connection string. Only used when
+   *  `EXECUTOR_DIRECT_DATABASE_URL === "true"` (keeps Hyperdrive the default
+   *  path); also serves as the fallback when a Hyperdrive binding is absent. */
+  readonly DATABASE_URL?: string;
+  /** Set to "true" to connect to `DATABASE_URL` directly instead of through
+   *  Hyperdrive. For local dev / admin scripts only — mirrors `apps/cloud`. */
+  readonly EXECUTOR_DIRECT_DATABASE_URL?: string;
   /** MCP session Durable Object namespace — one addressable isolate per MCP
    *  session (the DO id IS the session id), so a session survives across the
    *  Worker's stateless isolates. */

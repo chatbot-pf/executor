@@ -33,6 +33,25 @@
       "bucket_name": "executor-blobs",
     },
   ],
+  // ---------------------------------------------------------------------------
+  // OPTIONAL: Neon Postgres via Hyperdrive (opt-in; D1 above is the default).
+  // The Worker auto-selects Postgres when a HYPERDRIVE binding is present (see
+  // src/db/index.ts). To enable:
+  //   1. Create a Neon project (https://neon.tech) and copy its connection string.
+  //   2. wrangler hyperdrive create executor-pg \
+  //        --connection-string="postgresql://USER:PASS@EP.neon.tech/neondb?sslmode=require"
+  //   3. Uncomment the block below and set "id" to the Hyperdrive id from step 2.
+  //   4. `bun run deploy`. The schema is provisioned automatically on first boot.
+  // For local dev, run `bun run dev:db` (PGlite on :5433) alongside `bun run dev`;
+  // the localConnectionString below points wrangler at it.
+  // ---------------------------------------------------------------------------
+  // "hyperdrive": [
+  //   {
+  //     "binding": "HYPERDRIVE",
+  //     "id": "<your-hyperdrive-id>",
+  //     "localConnectionString": "postgresql://postgres:postgres@127.0.0.1:5433/postgres",
+  //   },
+  // ],
   // The MCP session Durable Object: one addressable isolate per MCP session (the
   // DO id IS the session id) so a session survives across the Worker's stateless
   // isolates — without it, `tools/list` after `initialize` can land on a fresh

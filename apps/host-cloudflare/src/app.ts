@@ -5,7 +5,7 @@ import { dbProviderLayer, ExecutorApp, textFailureStrategy } from "@executor-js/
 
 import { loadConfig, type CloudflareEnv } from "./config";
 import { makeCloudflarePlugins } from "./plugins";
-import { createD1ExecutorDb } from "./db/d1";
+import { createExecutorDb } from "./db";
 import { cloudflareAccessIdentityLayer } from "./auth/cloudflare-access";
 import {
   CloudflareCodeExecutorProvider,
@@ -40,9 +40,11 @@ export const makeCloudflareApp = async (env: CloudflareEnv) => {
   // executor is built — the default variant can't fetch its .wasm on Workers.
   await preloadQuickJs();
 
-  // Open + idempotently bring up the D1 schema once (the long-lived handle the
-  // per-request scoped executor reads through the DbProvider seam).
-  const dbHandle = await createD1ExecutorDb(env.DB, env.BLOBS);
+  // Open + idempotently bring up the schema once (the long-lived handle the
+  // per-request scoped executor reads through the DbProvider seam). The seam is
+  // D1 by default; a Hyperdrive binding / DATABASE_URL switches it to Postgres
+  // (see ./db/index.ts).
+  const dbHandle = await createExecutorDb(env);
   const identityLayer = cloudflareAccessIdentityLayer(config);
   // MCP runs through the `MCP_SESSION` Durable Object (cross-isolate sessions);
   // each session DO opens its own D1 handle, so it takes `env`, not `dbHandle`.

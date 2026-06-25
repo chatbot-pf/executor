@@ -7,7 +7,7 @@ paths, different injected providers:
 | Seam         | Cloudflare provider                                              |
 | ------------ | ---------------------------------------------------------------- |
 | **identity** | Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`) — no app login |
-| **db**       | D1 (SQLite) via the shared FumaDB assembly                       |
+| **db**       | D1 (SQLite) by default; Neon/Postgres via Hyperdrive (opt-in)    |
 | **engine**   | QuickJS-WASM, in-Worker (no extra binding)                       |
 | **mcp**      | Access-JWT auth + the shared in-process session store            |
 | **account**  | `/account/me` from the Access principal (members/keys → Access)  |
@@ -76,6 +76,39 @@ running `wrangler dev` if you need live data.
 
 `ENABLE_DEV_AUTH` is a dev-only escape hatch — never set it in a deployed
 environment (it disables the Access gate).
+
+## Neon Postgres (opt-in; D1 is the default)
+
+D1 (SQLite) is the default db seam — zero external dependencies, auto-provisioned
+by `wrangler deploy`, co-located with the Worker. That is the right default for
+this single-tenant template. Swap to Neon Postgres over Cloudflare Hyperdrive
+when you need real interactive transactions, no bound-parameter cap, large
+values without the ~1-2MB D1 ceiling, or to scale past D1's 10GB limit. The
+Worker auto-selects Postgres when a Hyperdrive binding is present — no code
+change (see `src/db/index.ts`).
+
+```bash
+# 1. Create a Neon project (https://neon.tech) and copy its connection string.
+# 2. Create a Hyperdrive config pointing at it:
+bunx wrangler hyperdrive create executor-pg \
+  --connection-string="postgresql://USER:PASS@EP.neon.tech/neondb?sslmode=require"
+# 3. In wrangler.jsonc, uncomment the "hyperdrive" block and set "id" to the id
+#    printed above. (Leave the d1_databases block; it just goes unused.)
+# 4. Deploy. The schema is provisioned automatically on first boot (runtime
+#    ensure, same code path as D1), so there is no separate migration step.
+bun run deploy
+```
+
+Local dev against Postgres (PGlite stands in for Neon, no Docker):
+
+```bash
+bun run dev:db    # PGlite over a socket at postgresql://…@127.0.0.1:5433/postgres
+bun run dev       # wrangler dev reads HYPERDRIVE.localConnectionString
+```
+
+The R2 `BLOBS` bucket stays useful under Postgres (large blob offload) and is
+optional either way. Migrating existing data from a live D1 deployment to
+Postgres is out of scope — a fresh Postgres database starts empty.
 
 ## Notes
 

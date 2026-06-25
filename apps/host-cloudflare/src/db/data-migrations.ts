@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import type { Sql } from "postgres";
 import type { D1Database, D1DatabaseSession, R2Bucket } from "@cloudflare/workers-types";
 
 import {
@@ -88,3 +89,15 @@ export const runCloudflareDataMigrations = (
   Effect.runPromise(
     runSqliteDataMigrations(d1DataMigrationClient(db), cloudflareDataMigrations(bucket)),
   );
+
+// Postgres (Neon) path — see ./postgres.ts. A fresh Postgres deployment has no
+// legacy D1 data, so there is nothing to migrate. The existing data migration
+// (the Google OpenAPI ownership move + its R2 blob copy) is SQLite-specific
+// (`json_extract`/`json_type`, D1 sessions) and only relevant to deployments
+// that previously ran on D1. Moving existing data D1 -> Postgres is out of
+// scope (a manual export/import); if a Postgres-native data migration is ever
+// needed, add a Postgres ledger here modelled on apps/cloud's code migrations.
+export const runCloudflarePostgresDataMigrations = async (
+  _sql: Sql,
+  _bucket: R2Bucket | undefined,
+): Promise<readonly string[]> => [];
