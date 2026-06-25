@@ -642,4 +642,60 @@ describe("syncStaleConnectionTools", () => {
       yield* harness.close();
     }),
   );
+
+  it.effect("scopes the cache per subject so one binding's sync does not skip another's", () =>
+    Effect.gen(function* () {
+      // Two subjects share ONE DB handle (as per-request scoped executors do in
+      // an isolate), so they share the outer cache bucket. The inner key must
+      // include the subject: after subject "a" converges and caches, subject
+      // "b" (its own stale connection) must STILL scan. A tenant-only key would
+      // make "b" wrongly skip here and serve a stale catalog.
+      const tables = collectTables();
+      const real = yield* Effect.promise(() =>
+        createSqliteTestFumaDb({ tables, namespace: "executor_test" }),
+      );
+      const counts: Record<string, number> = {};
+      const adapter = real.db.internal;
+      const realFindMany = adapter.findMany.bind(adapter);
+      adapter.findMany = (table, options) => {
+        counts[table.ormName] = (counts[table.ormName] ?? 0) + 1;
+        return realFindMany(table, options);
+      };
+      const make = (subject: string) =>
+        createExecutor({
+          tenant: Tenant.make("shared-tenant"),
+          subject: Subject.make(subject),
+          db: real.db, // shared handle => shared outer cache bucket, as in prod
+          plugins: [demoPlugin] as const,
+          onElicitation: "accept-all",
+        });
+      const a = yield* make("a");
+      const b = yield* make("b");
+
+      yield* a.demo.seed(); // tenant-level integration, visible to both subjects
+      const mkConn = (exec: typeof a) =>
+        exec.connections.create({
+          owner: "user",
+          name: CONN,
+          integration: INTEG,
+          template: TEMPLATE,
+          from: { provider: ProviderKey.make("memory"), id: ProviderItemId.make("v") },
+        });
+      yield* mkConn(a);
+      yield* mkConn(b);
+      yield* a.demo.reviseConfig(1); // both subjects' personal connections go stale
+
+      // A converges and caches its own (tenant, "a") entry.
+      yield* a.tools.list();
+
+      // B shares the handle but is a different subject: it must still scan.
+      counts.connection = 0;
+      yield* b.tools.list();
+      expect(counts.connection ?? 0).toBeGreaterThanOrEqual(1);
+
+      yield* a.close();
+      yield* b.close();
+      yield* Effect.promise(() => real.close());
+    }),
+  );
 });

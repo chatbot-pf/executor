@@ -2496,7 +2496,9 @@ export const createExecutor = <const TPlugins extends readonly AnyPlugin[] = rea
     // synced past the current watermark we cache it and skip the connection
     // scan on subsequent reads until a new revision moves the watermark.
     const staleSyncCache = staleSyncWatermarkFor(rootDbUntyped);
-    const staleSyncCacheKey = `${tenant} ${subject ?? ""}`;
+    // NUL-separated so no `(tenant, subject)` pair can collide with another
+    // through a separator character in either value.
+    const staleSyncCacheKey = `${tenant}\u0000${subject ?? ""}`;
     const syncStaleConnectionTools = Effect.gen(function* () {
       const revised = yield* core.findMany("integration", {
         where: (b: AnyCb) => b.isNotNull("config_revised_at"),
